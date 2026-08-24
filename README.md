@@ -57,6 +57,49 @@ make systemd-uninstall  # 卸载 unit
 可调参数：`make systemd-install PORT=9000 DEVICE=cuda:0`；
 额外环境变量写入 `/etc/yocr/yocr.env`（每行 `KEY=VALUE`），无需改 unit 文件。
 
+### 离线部署：用 `uvx hf` 预下载模型
+
+生产服务器无法访问 HuggingFace 时，启动会报
+`No available model hosting platforms detected...`（PaddleX 找不到模型源）。
+解决方法：在**任意有网的机器**上用 `hf` CLI 把模型下载到指定目录布局，再整包拷到服务器。
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com        # 国内加速；海外可去掉
+CACHE=/data/yocr-cache                           # 缓存根目录（自定）
+
+# ① ScreenParser 权重 → 标准 HF 缓存布局
+HF_HOME=$CACHE/huggingface \
+uvx --from "huggingface_hub[cli]" hf download docling-project/ScreenParser best.pt
+
+# ②③ PaddleOCR det/rec 模型 → 必须 按 paddlex 的目录约定摆放(--local-dir)
+for m in PP-OCRv5_mobile_det PP-OCRv5_mobile_rec; do
+  uvx --from "huggingface_hub[cli]" hf download "PaddlePaddle/$m" \
+      --local-dir "$CACHE/.paddlex/official_models/$m"
+done
+```
+
+> 注意 ②③ 必须带 `--local-dir ".../official_models/<模型名>"`，
+> paddlex 只认这个路径布局；直接下进 HF 缓存它看不到。
+
+把 `$CACHE` 整包 scp 到服务器后，配置环境变量并重启：
+
+```bash
+sudo tee /etc/yocr/yocr.env <<'EOF'
+HF_HOME=/data/yocr-cache/huggingface
+PADDLE_PDX_CACHE_HOME=/data/yocr-cache/.paddlex
+HF_HUB_OFFLINE=1
+EOF
+make systemd-restart && make health    # 应输出 "ocr_loaded": true
+```
+
+- `PADDLE_PDX_CACHE_HOME`：PaddleX 查找 OCR det/rec 模型的位置
+- `HF_HOME`：ScreenParser 等走 `hf_hub_download` 的权重位置
+- `HF_HUB_OFFLINE=1`：只读缓存、不再联网尝试（避免启动卡超时）
+
+自训模型 `android_ui_detection_yolov8.pt` 不走 hf，直接放进服务器 `models/` 目录即可。
+想提精度可换成 server 版：循环里改为 `PP-OCRv5_server_det` / `PP-OCRv5_server_rec`，
+并在 yocr.env 加 `YOCR_OCR_DET_MODEL` / `YOCR_OCR_REC_MODEL` 对应项。
+
 ## 模型配置
 
 | 名称 | 来源 | 说明 |

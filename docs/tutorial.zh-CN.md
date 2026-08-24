@@ -341,6 +341,10 @@ def test_allow_dialog_visible(yocr):
 
 ## 6. FAQ
 
+**Q: 生产服务器（无外网）报 `No available model hosting platforms detected...`？**
+PaddleX 连不上模型托管平台。用 `uvx hf` 在有网机器预下载后拷过去，完整步骤见
+README「[离线部署：用 uvx hf 预下载模型](../README.md#离线部署用-uvx-hf-预下载模型)」。
+
 **Q: 第一次请求特别慢？**
 首次调用要加载权重 + 首帧推理建图，之后就是热路径（CPU 实测：检测 ~2.7s→2.4s，OCR ~0.75s）。
 生产上务必配置启动预热：`YOCR_PRELOAD_MODELS=screenparser` + `YOCR_PRELOAD_OCR=1`。
