@@ -1,0 +1,27 @@
+services:
+  yocr:
+    build: .
+    image: yocr:latest
+    container_name: yocr
+    ports:
+      - "8000:8000"
+    environment:
+      YOCR_DEVICE: cpu                # or cuda:0 on GPU hosts
+      YOCR_OCR_LANG: ch
+      YOCR_PRELOAD_MODELS: "screenparser"
+      YOCR_PRELOAD_OCR: "1"
+      YOCR_LOG_LEVEL: INFO
+      # extra model aliases, e.g. custom UI detector placed in ./models
+      # YOCR_MODEL_ALIASES: "ui=android_ui_detection_yolov8.pt"
+    volumes:
+      - ./models:/app/models:ro       # put android_ui_detection_yolov8.pt here
+      - hf-cache:/app/.cache/huggingface
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/v1/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  hf-cache:

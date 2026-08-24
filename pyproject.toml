@@ -1,0 +1,30 @@
+[project]
+name = "yocr"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Lee Heng", email = "1034520553@qq.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141.1",
+    "paddleocr>=3.7.0",
+    "paddlepaddle>=3.3.1",
+    "pydantic-settings>=2.15.0",
+    "python-multipart>=0.0.32",
+    "ultralytics>=8.4.127",
+    "uvicorn[standard]>=0.52.4",
+]
+
+[project.scripts]
+yocr = "yocr.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
