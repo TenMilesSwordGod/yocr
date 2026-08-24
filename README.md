@@ -121,6 +121,22 @@ make systemd-restart && make health    # 应输出 "ocr_loaded": true
 想提精度可换成 server 版：循环里改为 `PP-OCRv5_server_det` / `PP-OCRv5_server_rec`，
 并在 yocr.env 加 `YOCR_OCR_DET_MODEL` / `YOCR_OCR_REC_MODEL` 对应项。
 
+#### hf 下载报 401？
+
+两个已验证的原因（Makefile 已内置第一种的修复）：
+
+| 原因 | 现象 | 解决 |
+|---|---|---|
+| HF 新 Xet 存储后端无法被镜像代理（`cas-server.xethub.hf.co ... 401`） | 走 `HF_ENDPOINT=hf-mirror.com` 时偶发/必现 401 | 加 `HF_HUB_DISABLE_XET=1` 走传统 HTTP 通道（models-download 已自动带上） |
+| 环境残留无效凭证 | `HF_TOKEN`/`HUGGING_FACE_HUB_TOKEN` 过期或写错 | `unset HF_TOKEN HUGGING_FACE_HUB_TOKEN`；公共仓库匿名即可下载 |
+
+手动命令示例：
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1 \
+uvx --from "huggingface_hub[cli]" hf download PaddlePaddle/PP-OCRv5_mobile_det
+```
+
 ## 模型配置
 
 | 名称 | 来源 | 说明 |

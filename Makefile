@@ -48,14 +48,16 @@ health: ## 探活: curl /api/v1/healthz
 models-download: ## 用 uvx hf 下载模型到 .cache/（SKIP_MODELS=1 跳过；HF_ENDPOINT 可换源）
 	@if [ "$(SKIP_MODELS)" = "1" ]; then echo "== SKIP_MODELS=1, 跳过模型下载"; exit 0; fi
 	@mkdir -p "$(CACHE_DIR)/huggingface" "$(CACHE_DIR)/paddlex/official_models"
+	@if [ -n "$$HF_TOKEN" ] || [ -n "$$HUGGING_FACE_HUB_TOKEN" ]; then \
+		echo "!! 已设置 HF_TOKEN/HUGGING_FACE_HUB_TOKEN：若报 401 请 unset 或更换(公共仓库匿名即可)"; fi
 	@if [ -n "$(HF_ENDPOINT)" ]; then export HF_ENDPOINT="$(HF_ENDPOINT)"; \
 		echo "== HF_ENDPOINT=$(HF_ENDPOINT)"; fi
 	@echo "== ScreenParser -> $(CACHE_DIR)/huggingface"
-	HF_HOME="$(CACHE_DIR)/huggingface" \
+	HF_HOME="$(CACHE_DIR)/huggingface" HF_HUB_DISABLE_XET=1 \
 		uvx --from "huggingface_hub[cli]" hf download docling-project/ScreenParser best.pt
 	@for m in $(PADDLE_OCR_MODELS); do \
 		echo "== PaddlePaddle/$$m -> paddlex/official_models/$$m"; \
-		uvx --from "huggingface_hub[cli]" hf download "PaddlePaddle/$$m" \
+		HF_HUB_DISABLE_XET=1 uvx --from "huggingface_hub[cli]" hf download "PaddlePaddle/$$m" \
 			--local-dir "$(CACHE_DIR)/paddlex/official_models/$$m"; \
 	done
 
