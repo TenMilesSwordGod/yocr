@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import threading
 import time
@@ -72,8 +73,11 @@ class OCREngine:
         return self._engine
 
     def _rebuild_without_mkldnn(self):
-        logger.warning("disabling oneDNN for PaddleOCR and rebuilding engine")
+        logger.warning("disabling oneDNN for PaddleOCR and rebuilding engine", exc_info=True)
         self._mkldnn = False
+        # 释放旧引擎的全局资源，避免 paddle 框架层面的二次初始化冲突
+        self._engine = None
+        gc.collect()
         with self._lock:
             self._engine = self._build()
         return self._engine
@@ -89,7 +93,14 @@ class OCREngine:
             if not self._mkldnn:
                 raise
             logger.error("paddle inference failed with oneDNN (%s)", exc)
-            raw = self._infer(self._rebuild_without_mkldnn(), image)
+            try:
+                raw = self._infer(self._rebuild_without_mkldnn(), image)
+            except Exception as exc2:  # noqa: BLE001 - chain both failures for diagnosis
+                raise RuntimeError(
+                    f"OCR engine rebuild without oneDNN also failed. "
+                    f"first failure(oneDNN): {exc!r}; second failure: {exc2!r}; "
+                    f"workaround: set YOCR_OCR_MKLDNN=0"
+                ) from exc2
         items: list[TextItem] = []
         for page in raw or []:
             items.extend(self._parse_page(page))

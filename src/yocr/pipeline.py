@@ -84,7 +84,17 @@ def detect(ctx: AnalysisContext, image: np.ndarray, model: str | None = None, co
 
 def run_ocr(ctx: AnalysisContext, image: np.ndarray) -> tuple[list[TextLine], str, float]:
     started = time.perf_counter()
-    items: list[TextItem] = ctx.ocr.recognize(image)
+    try:
+        items: list[TextItem] = ctx.ocr.recognize(image)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - surface engine problems as clean 503
+        logger.exception("OCR engine unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail=f"OCR engine unavailable: {exc!r}. "
+                   f"若为 oneDNN 兼容问题，可设置 YOCR_OCR_MKLDNN=0 后重启",
+        ) from exc
     lines = [
         TextLine(text=item.text, confidence=round(item.confidence, 4), box=Box.from_xyxy(*item.xyxy))
         for item in items
