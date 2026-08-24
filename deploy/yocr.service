@@ -1,0 +1,30 @@
+# yocr systemd unit —— 由 Makefile 的 systemd-install 目标渲染部署，
+# 占位符: __APP_DIR__ __RUN_USER__ __RUN_GROUP__ __HOST__ __PORT__ __DEVICE__ __OCR_LANG__
+[Unit]
+Description=yocr - YOLO+PaddleOCR vision analysis service
+Documentation=https://github.com/TenMilesSwordGod/yocr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__APP_DIR__
+ExecStart=__APP_DIR__/.venv/bin/yocr serve --host __HOST__ --port __PORT__
+Environment=YOCR_DEVICE=__DEVICE__
+Environment=YOCR_OCR_LANG=__OCR_LANG__
+# 可选: 在 /etc/yocr/yocr.env 里放额外环境变量(每行 KEY=VALUE)，无需改 unit
+EnvironmentFile=-/etc/yocr/yocr.env
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+
+# 轻量加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=__APP_DIR__
+
+[Install]
+WantedBy=multi-user.target

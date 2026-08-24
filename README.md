@@ -16,12 +16,17 @@ FastAPI 提供 REST API，接收截图后按参数选择模型，返回 UI 元�
 
 ## 快速开始
 
+```bash
+make help        # 查看全部任务
+```
+
 ### 本地运行 (uv)
 
 ```bash
 # 依赖: Python 3.12+, uv
 uv sync                      # 安装依赖
 uv run yocr serve --port 8000
+# 或: make run PORT=8000
 ```
 
 Windows 上同样适用（需先装 Python/uv）；若使用 GPU 推理设置 `YOCR_DEVICE=cuda:0`。
@@ -30,9 +35,27 @@ Windows 上同样适用（需先装 Python/uv）；若使用 GPU 推理设置 `Y
 
 ```bash
 mkdir -p models   # 放入 android_ui_detection_yolov8.pt（可选）
-docker compose up -d --build
+docker compose up -d --build      # 或: make docker-up
 curl http://127.0.0.1:8000/api/v1/healthz
 ```
+
+常用：`make docker-logs`（日志）、`make docker-restart`、`make docker-down`
+
+### systemd（Linux 常驻 + 开机自启）
+
+以当前仓库目录 + `.venv` 方式常驻，服务以当前用户身份运行：
+
+```bash
+make systemd-install    # 渲染 unit 并安装(需输 sudo 密码)
+make systemd-start      # 启动并设置开机自启
+make health             # 探活 http://127.0.0.1:8000/api/v1/healthz
+make systemd-logs       # journalctl -u yocr -f
+make systemd-stop       # 停止并取消自启
+make systemd-uninstall  # 卸载 unit
+```
+
+可调参数：`make systemd-install PORT=9000 DEVICE=cuda:0`；
+额外环境变量写入 `/etc/yocr/yocr.env`（每行 `KEY=VALUE`），无需改 unit 文件。
 
 ## 模型配置
 
@@ -159,8 +182,9 @@ examples/
 docs/
 └── tutorial.zh-CN.md  # 中文实战教程
 tests/              # pytest 单元测试
-Dockerfile
-docker-compose.yml
+deploy/             # systemd unit 模板 (make systemd-install 渲染安装)
+Dockerfile / docker-compose.yml
+Makefile            # 开发/Docker/systemd 部署任务入口
 ```
 
 ## 测试
