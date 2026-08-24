@@ -80,9 +80,9 @@ YOCR_MODEL_ALIASES="ui=android_ui_detection_yolov8.pt,mydet=org/repo/best.pt"
 |---|---|---|
 | GET | `/healthz` | 健康检查、已注册模型列表 |
 | GET | `/models` | 模型详情（是否已加载、类别表） |
-| POST | `/detect` | YOLO 元素检测 |
+| POST | `/detect` | YOLO 元素检测（支持 `text`/`label`/`q` 目标参数，返回 `found`/`matched`） |
 | POST | `/ocr` | PaddleOCR 文字识别 |
-| POST | `/analyze` | 检测 + OCR + 文本归属合并（推荐） |
+| POST | `/analyze` | 检测 + OCR + 文本归属合并（推荐，同支持 `found`/`matched`） |
 
 ### POST /detect
 

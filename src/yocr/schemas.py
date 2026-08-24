@@ -51,6 +51,8 @@ class DetectResponse(BaseModel):
     model: str
     image: ImageInfo
     elements: list[Element]
+    found: bool = Field(default=False, description="是否命中查询目标(text/label/q 参数)")
+    matched: Optional[Element] = Field(default=None, description="命中的最优元素")
     timing: Timing
 
 
@@ -65,6 +67,8 @@ class AnalyzeResponse(BaseModel):
     model: str
     image: ImageInfo
     elements: list[Element]
+    found: bool = Field(default=False, description="是否命中查询目标(text/label/q 参数)")
+    matched: Optional[Element] = Field(default=None, description="命中的最优元素")
     lines: list[TextLine]
     full_text: str
     timing: Timing

@@ -133,6 +133,36 @@ el2 = c.find(result, text="允许")                # 中文一样用
 x, y = c.find_by_text(png, "Bluetooth", **KW)
 ```
 
+### 场景一·加速版：服务端直接返回 found: bool
+
+不用自己遍历 `elements` —— 请求时带上 `text`（或 `label`/`q`），
+响应里**固定**多出两个字段：`found`（是否命中）和 `matched`（命中的最优元素）：
+
+```bash
+curl -F "file=@screen.png" \
+     "http://127.0.0.1:8000/api/v1/analyze?model=screenparser&text=Allow" | jq '.found'
+# true
+```
+
+```python
+r = requests.post(f"{YOCR}/analyze",
+                  params={"model": "screenparser", "text": "Allow"},
+                  files={"file": ("s.png", png, "image/png")}).json()
+if r["found"]:
+    x, y = r["matched"]["box"]["center"]
+```
+
+| 参数 | 作用 |
+|---|---|
+| `text` | 在元素的 OCR 文本里找 |
+| `label` | 在 YOLO 类别名里找，如 `Button`、`App Icon` |
+| `q` | 泛搜索：文本或类别任一命中即算 |
+| `match_mode` | `contains`(默认) / `exact` / `fuzzy` |
+
+- 未命中时 `found=false`、`matched=null`，但 `elements` 照常返回，不影响其它断言
+- 不带这些参数时 `found` 恒为 `false`
+- 客户端封装：`c.locate(png, text="Allow", **KW)` —— 命中直接给元素 dict，没命中给 None
+
 文字匹配三种模式：
 
 ```python

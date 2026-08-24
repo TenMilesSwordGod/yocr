@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from .config import Settings
 from .detectors import YOLORegistry
 from .imaging import decode_base64_image, decode_image
+from .matching import best_match
 from .ocr_engine import OCREngine, TextItem, get_ocr_engine
 from .schemas import (
     AnalyzeResponse,
@@ -25,6 +26,12 @@ from .schemas import (
 )
 
 logger = logging.getLogger("yocr.pipeline")
+
+
+def _resolve_target(elements: list[Element], *, text: str | None, label: str | None,
+                    q: str | None, match_mode: str) -> tuple[bool, Element | None]:
+    matched = best_match(elements, text=text, label=label, q=q, match_mode=match_mode)
+    return matched is not None, matched
 
 
 @dataclass
@@ -108,7 +115,9 @@ def attach_texts(elements: list[Element], lines: list[TextLine]) -> None:
 
 def analyze(ctx: AnalysisContext, image_bytes: bytes | None, base64_image: str | None, *,
             model: str | None = None, conf: float | None = None, iou: float | None = None,
-            imgsz: int | None = None, with_ocr: bool = True) -> tuple[np.ndarray, AnalyzeResponse]:
+            imgsz: int | None = None, with_ocr: bool = True,
+            text: str | None = None, label: str | None = None, q: str | None = None,
+            match_mode: str = "contains") -> tuple[np.ndarray, AnalyzeResponse]:
     total_started = time.perf_counter()
     image = load_image(image_bytes, base64_image)
     height, width = image.shape[:2]
@@ -122,10 +131,14 @@ def analyze(ctx: AnalysisContext, image_bytes: bytes | None, base64_image: str |
         lines, full_text, ocr_ms = run_ocr(ctx, image)
         attach_texts(elements, lines)
 
+    found, matched = _resolve_target(elements, text=text, label=label, q=q, match_mode=match_mode)
+
     response = AnalyzeResponse(
         model=model_name,
         image=ImageInfo(width=width, height=height),
         elements=elements,
+        found=found,
+        matched=matched,
         lines=lines,
         full_text=full_text,
         timing=Timing(
@@ -152,15 +165,20 @@ def ocr_only(ctx: AnalysisContext, image_bytes: bytes | None, base64_image: str 
 
 def detect_only(ctx: AnalysisContext, image_bytes: bytes | None, base64_image: str | None, *,
                 model: str | None = None, conf: float | None = None, iou: float | None = None,
-                imgsz: int | None = None) -> DetectResponse:
+                imgsz: int | None = None,
+                text: str | None = None, label: str | None = None, q: str | None = None,
+                match_mode: str = "contains") -> DetectResponse:
     started = time.perf_counter()
     image = load_image(image_bytes, base64_image)
     height, width = image.shape[:2]
     model_name, elements, detect_ms = detect(ctx, image, model=model, conf=conf, iou=iou, imgsz=imgsz)
+    found, matched = _resolve_target(elements, text=text, label=label, q=q, match_mode=match_mode)
     return DetectResponse(
         model=model_name,
         image=ImageInfo(width=width, height=height),
         elements=elements,
+        found=found,
+        matched=matched,
         timing=Timing(total_ms=round((time.perf_counter() - started) * 1000, 1), detect_ms=round(detect_ms, 1)),
     )
 

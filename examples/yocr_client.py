@@ -42,10 +42,24 @@ class YocrClient:
 
     def analyze(self, png: bytes, *, model: str | None = None, conf: float | None = None,
                 iou: float | None = None, imgsz: int | None = None,
-                with_ocr: bool = True) -> dict:
-        """检测 + OCR 融合（推荐）：元素的 text 字段即控件上的文字。"""
+                with_ocr: bool = True,
+                text: str | None = None, label: str | None = None,
+                q: str | None = None, match_mode: str | None = None) -> dict:
+        """检测 + OCR 融合（推荐）：元素的 text 字段即控件上的文字。
+
+        传 text/label/q 时响应带 found: bool 与 matched 元素。
+        """
         return self._post("/analyze", png, params=_drop_none(
-            model=model, conf=conf, iou=iou, imgsz=imgsz, with_ocr=with_ocr))
+            model=model, conf=conf, iou=iou, imgsz=imgsz, with_ocr=with_ocr,
+            text=text, label=label, q=q, match_mode=match_mode))
+
+    def locate(self, png: bytes, *, text: str | None = None, label: str | None = None,
+               q: str | None = None, match_mode: str | None = None,
+               **kwargs) -> dict | None:
+        """一步判定目标是否在屏：命中返回元素 dict(含 box.center)，否则 None。"""
+        result = self.analyze(png, text=text, label=label, q=q,
+                              match_mode=match_mode, **kwargs)
+        return result["matched"] if result.get("found") else None
 
     def _post(self, path: str, png: bytes, params: dict | None = None) -> dict:
         r = self.session.post(
@@ -88,7 +102,7 @@ class YocrClient:
 
     # ------------------------------------------------- 场景快捷方法 --
     def find_by_text(self, png: bytes, text: str, **kwargs) -> tuple[int, int] | None:
-        el = self.find(self.analyze(png, **kwargs), text=text)
+        el = self.locate(png, text=text, **kwargs)
         return self.center(el) if el else None
 
     def find_icon(self, png: bytes, labels: Iterable[str] = ("App Icon", "Utility Button", "Button"),

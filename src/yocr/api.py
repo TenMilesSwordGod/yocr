@@ -83,6 +83,10 @@ async def detect_endpoint(
     conf: float | None = Query(default=None, ge=0.0, le=1.0),
     iou: float | None = Query(default=None, ge=0.0, le=1.0),
     imgsz: int | None = Query(default=None),
+    text: str | None = Query(default=None, description="按元素 OCR 文本查找，响应带 found/matched"),
+    label: str | None = Query(default=None, description="按 YOLO 类别名查找"),
+    q: str | None = Query(default=None, description="泛搜索：文本或类别任一命中"),
+    match_mode: str = Query(default="contains", pattern="^(contains|exact|fuzzy)$"),
 ):
     ctx = get_ctx(request)
     if not file and image_base64 is None:
@@ -90,7 +94,8 @@ async def detect_endpoint(
     if not file and not image_base64:
         raise HTTPException(status_code=400, detail="provide multipart 'file' or 'image_base64'")
     try:
-        return detect_only(ctx, file, image_base64, model=model, conf=conf, iou=iou, imgsz=imgsz)
+        return detect_only(ctx, file, image_base64, model=model, conf=conf, iou=iou, imgsz=imgsz,
+                           text=text, label=label, q=q, match_mode=match_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -122,6 +127,10 @@ async def analyze_endpoint(
     iou: float | None = Query(default=None, ge=0.0, le=1.0),
     imgsz: int | None = Query(default=None),
     with_ocr: bool = Query(default=True),
+    text: str | None = Query(default=None, description="按元素 OCR 文本查找，响应带 found/matched"),
+    label: str | None = Query(default=None, description="按 YOLO 类别名查找"),
+    q: str | None = Query(default=None, description="泛搜索：文本或类别任一命中"),
+    match_mode: str = Query(default="contains", pattern="^(contains|exact|fuzzy)$"),
 ):
     ctx = get_ctx(request)
     if not file and image_base64 is None:
@@ -132,6 +141,7 @@ async def analyze_endpoint(
         _, response = analyze(
             ctx, file, image_base64,
             model=model, conf=conf, iou=iou, imgsz=imgsz, with_ocr=with_ocr,
+            text=text, label=label, q=q, match_mode=match_mode,
         )
         return response
     except ValueError as exc:
