@@ -13,3 +13,5 @@ models/
 
 # secrets
 .token
+# 模型缓存 (make models-download)
+.cache/

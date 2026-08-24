@@ -43,19 +43,40 @@ curl http://127.0.0.1:8000/api/v1/healthz
 
 ### systemd（Linux 常驻 + 开机自启）
 
-以当前仓库目录 + `.venv` 方式常驻，服务以当前用户身份运行：
+以当前仓库目录 + `.venv` 方式常驻，服务以当前用户身份运行。
+**一条命令完成依赖安装 + 模型下载（uvx hf）+ 服务安装**：
 
 ```bash
-make systemd-install    # 渲染 unit 并安装(需输 sudo 密码)
+make systemd-install    # 依赖 + uvx hf 下载模型到 .cache/ + 渲染安装 unit(需输 sudo 密码)
 make systemd-start      # 启动并设置开机自启
-make health             # 探活 http://127.0.0.1:8000/api/v1/healthz
+make health             # 探活 http://127.0.0.1:8000/api/v1/healthz -> "ocr_loaded": true
 make systemd-logs       # journalctl -u yocr -f
 make systemd-stop       # 停止并取消自启
 make systemd-uninstall  # 卸载 unit
 ```
 
-可调参数：`make systemd-install PORT=9000 DEVICE=cuda:0`；
-额外环境变量写入 `/etc/yocr/yocr.env`（每行 `KEY=VALUE`），无需改 unit 文件。
+常用变量（均可覆盖）：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `CACHE_DIR` | `./.cache` | 模型缓存根目录（HF_HOME / paddlex 缓存都放这） |
+| `HF_ENDPOINT` | `https://hf-mirror.com` | 下载源；置空则直连官方 |
+| `PADDLE_OCR_MODELS` | `PP-OCRv5_mobile_det PP-OCRv5_mobile_rec` | 要预下载的 OCR 模型，可换 server 版提精度 |
+| `HF_OFFLINE` | `1` | 预下载后离线运行（只读缓存） |
+| `SKIP_MODELS` | `0` | 置 1 跳过下载（如已手工拷贝缓存） |
+| `PORT` / `DEVICE` | `8000` / `cpu` | 监听端口 / 推理设备 |
+
+示例：
+
+```bash
+# GPU + 高精度 OCR 模型
+make systemd-install DEVICE=cuda:0 PADDLE_OCR_MODELS="PP-OCRv5_server_det PP-OCRv5_server_rec"
+# 已有缓存，只重装服务
+make systemd-install SKIP_MODELS=1
+```
+
+单独补下模型：`make models-download`；额外环境变量写入 `/etc/yocr/yocr.env`
+（优先级高于 unit 内置值），例如换缓存目录时无需重装服务。
 
 ### 离线部署：用 `uvx hf` 预下载模型
 

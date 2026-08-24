@@ -1,5 +1,6 @@
 # yocr systemd unit —— 由 Makefile 的 systemd-install 目标渲染部署，
-# 占位符: __APP_DIR__ __RUN_USER__ __RUN_GROUP__ __HOST__ __PORT__ __DEVICE__ __OCR_LANG__
+# 占位符: __APP_DIR__ __RUN_USER__ __RUN_GROUP__ __HOST__ __PORT__ __DEVICE__
+#         __OCR_LANG__ __HF_HOME__ __PADDLE_CACHE__ __HF_OFFLINE__
 [Unit]
 Description=yocr - YOLO+PaddleOCR vision analysis service
 Documentation=https://github.com/TenMilesSwordGod/yocr
@@ -14,7 +15,11 @@ WorkingDirectory=__APP_DIR__
 ExecStart=__APP_DIR__/.venv/bin/yocr serve --host __HOST__ --port __PORT__
 Environment=YOCR_DEVICE=__DEVICE__
 Environment=YOCR_OCR_LANG=__OCR_LANG__
-# 可选: 在 /etc/yocr/yocr.env 里放额外环境变量(每行 KEY=VALUE)，无需改 unit
+Environment=HF_HOME=__HF_HOME__
+Environment=PADDLE_PDX_CACHE_HOME=__PADDLE_CACHE__
+# 模型已由 make models-download 预下载；置 0 可恢复联网按需下载
+Environment=HF_HUB_OFFLINE=__HF_OFFLINE__
+# 可选: 在 /etc/yocr/yocr.env 里放额外环境变量(每行 KEY=VALUE)，优先级高于上面的值
 EnvironmentFile=-/etc/yocr/yocr.env
 Restart=on-failure
 RestartSec=3
