@@ -112,7 +112,9 @@ class YOLORegistry:
 
         logger.info("loading YOLO model '%s' from %s", spec.name, resolved)
         model = YOLO(resolved)
-        names = {int(k): str(v) for k, v in (model.names or {}).items()}
+        names = _normalize_names(getattr(model, "names", None))
+        if not names:
+            logger.warning("model '%s' exposes no usable class names; labels will be numeric", spec.name)
         with self._global_lock:
             self._models[spec.name] = model
             self._classes[spec.name] = names
@@ -172,7 +174,7 @@ class YOLORegistry:
             verbose=False,
         )
         detections: list[Detection] = []
-        names_map = self._classes.get(spec.name, {})
+        names_map = self._classes.get(spec.name) or _normalize_names(getattr(loaded, "names", None))
         for result in results:
             boxes = getattr(result, "boxes", None)
             if boxes is None:
@@ -189,6 +191,25 @@ class YOLORegistry:
                     )
                 )
         return spec, detections
+
+
+def _normalize_names(raw: object) -> dict[int, str]:
+    """Normalize a model's class-name mapping into {int_id: str_name}.
+
+    Ultralytics exposes `names` as dict[int, str] in most versions, but some
+    exports/versions return str keys or a plain list/tuple.
+
+    Args:
+        raw: Whatever `model.names` holds (dict/list/tuple/None).
+
+    Returns:
+        dict[int, str]: Class id -> readable class type; empty when unavailable.
+    """
+    if isinstance(raw, dict):
+        return {int(k): str(v) for k, v in raw.items()}
+    if isinstance(raw, (list, tuple)):
+        return {i: str(v) for i, v in enumerate(raw)}
+    return {}
 
 
 def warmup(registry: YOLORegistry, settings: Settings) -> None:

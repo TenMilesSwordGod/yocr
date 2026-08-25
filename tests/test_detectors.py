@@ -83,6 +83,48 @@ def test_detect_all_candidates_unavailable_aggregates_errors(monkeypatch, image)
     assert "ScreenParser" in detail
 
 
+class _FakeBox:
+    def __init__(self) -> None:
+        self.xyxy = [types.SimpleNamespace(tolist=lambda: [1.0, 2.0, 3.0, 4.0])]
+        self.cls = [types.SimpleNamespace(item=lambda: 0)]
+        self.conf = [types.SimpleNamespace(item=lambda: 0.9)]
+
+
+class _FakeResult:
+    boxes = None
+
+
+def test_predict_label_resolves_class_type_via_model_names(monkeypatch, image):
+    """Even when the registry cache misses, labels must use the model's own names."""
+    model = _FakeYOLO()
+    model.names = {0: "Text"}
+
+    result = _FakeResult()
+    result.boxes = [_FakeBox()]
+    model.predict = lambda *a, **k: [result]
+
+    monkeypatch.setattr(YOLORegistry, "_load", lambda self, spec: model)
+    registry = YOLORegistry(Settings())
+    registry._classes.pop("ScreenParser", None)  # simulate missing cache table
+
+    _, detections = registry.predict(image, model="screenparser")
+    assert len(detections) == 1
+    assert detections[0].label == "Text"
+    assert detections[0].class_id == 0
+    assert detections[0].confidence == pytest.approx(0.9)
+    assert detections[0].xyxy == (1.0, 2.0, 3.0, 4.0)
+
+
+def test_normalize_names_variants():
+    from yocr.detectors import _normalize_names
+
+    assert _normalize_names({0: "A", "1": "B"}) == {0: "A", 1: "B"}
+    assert _normalize_names(["X", "Y"]) == {0: "X", 1: "Y"}
+    assert _normalize_names(("Z",)) == {0: "Z"}
+    assert _normalize_names(None) == {}
+    assert _normalize_names(42) == {}
+
+
 def test_make_context_registry_exposes_last_error():
     registry = make_context(Settings()).registry
     assert registry.last_error("ScreenParser") is None
