@@ -160,3 +160,243 @@ def test_sucai_persistence_across_restart(client):
 
     reloaded = SucaiStore(Settings(sucai_dir=store.root).sucai_dir)
     assert {r["id"] for r in reloaded.list()} == before
+
+
+# ------------------------------------------------- extended edge cases ---
+def test_create_id_edge_cases(client):
+    png = _pattern_png(10, 10, seed=21)
+    # dotted / dashed / digit-leading ids are legal
+    for sid in ("a.b_c-d", "9lives"):
+        r = client.post("/api/v1/sucai",
+                        files={"file": ("x.png", png, "image/png")}, data={"id": sid})
+        assert r.status_code == 201, f"{sid}: {r.text}"
+    # illegal ids -> 400
+    for bad in ("-lead", "_lead", ".lead", "has space", "中文", "x" * 65, "a/b"):
+        r = client.post("/api/v1/sucai",
+                        files={"file": ("x.png", png, "image/png")}, data={"id": bad})
+        assert r.status_code == 400, bad
+    # empty id field -> auto-generate instead of erroring
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("x.png", png, "image/png")}, data={"id": ""})
+    assert r.status_code == 201 and r.json()["id"]
+
+
+def test_create_jpeg_normalized_to_png(client):
+    import io
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.fromarray(np.zeros((20, 30, 3), dtype=np.uint8)).save(buf, format="JPEG")
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("x.jpg", buf.getvalue(), "image/jpeg")},
+                    data={"id": "jpeg-src"})
+    assert r.status_code == 201
+    img = client.get("/api/v1/sucai/jpeg-src/image")
+    assert img.content.startswith(b"\x89PNG")
+
+
+def test_create_grayscale_and_tiny_images(client):
+    import io
+
+    from PIL import Image
+
+    gray = io.BytesIO()
+    Image.fromarray(np.full((15, 15), 128, dtype=np.uint8)).save(gray, format="PNG")
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("g.png", gray.getvalue(), "image/png")},
+                    data={"id": "gray-img"})
+    assert r.status_code == 201 and r.json()["width"] == 15
+
+    tiny = _pattern_png(1, 1, seed=22)
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("t.png", tiny, "image/png")}, data={"id": "one-px"})
+    assert r.status_code == 201
+
+
+def test_create_empty_file_400(client):
+    r = client.post("/api/v1/sucai", files={"file": ("x.png", b"", "image/png")})
+    assert r.status_code == 400
+
+
+def test_create_oversized_image_400(client):
+    big = cv2.imencode(".png", np.zeros((10, 2049, 3), dtype=np.uint8))[1].tobytes()
+    r = client.post("/api/v1/sucai", files={"file": ("big.png", big, "image/png")})
+    assert r.status_code == 400
+    assert "too large" in r.json()["detail"]
+
+
+def test_create_describe_is_trimmed(client):
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("x.png", _pattern_png(8, 8, seed=23), "image/png")},
+                    data={"id": "trim-me", "describe": "  padded  "})
+    assert r.json()["describe"] == "padded"
+
+
+def test_healthz_reports_sucai_count(client):
+    before = client.get("/api/v1/healthz").json()["sucai_count"]
+    client.post("/api/v1/sucai",
+                files={"file": ("x.png", _pattern_png(8, 8, seed=24), "image/png")},
+                data={"id": "counted"})
+    after = client.get("/api/v1/healthz").json()["sucai_count"]
+    assert after == before + 1
+
+
+def test_update_no_fields_400_and_partial_updates(client):
+    client.post("/api/v1/sucai",
+                files={"file": ("x.png", _pattern_png(20, 10, seed=25), "image/png")},
+                data={"id": "up-target", "describe": "original"})
+    # neither file nor describe -> 400
+    r = client.put("/api/v1/sucai/up-target")
+    assert r.status_code == 400
+
+    # describe only: picture untouched
+    r = client.put("/api/v1/sucai/up-target", data={"describe": "only text"})
+    assert r.status_code == 200 and r.json()["describe"] == "only text"
+    assert (r.json()["width"], r.json()["height"]) == (20, 10)
+
+    # picture only: describe untouched
+    r = client.put("/api/v1/sucai/up-target",
+                   files={"file": ("n.png", _pattern_png(11, 33, seed=26), "image/png")})
+    assert r.status_code == 200
+    assert (r.json()["width"], r.json()["height"]) == (11, 33)
+    assert r.json()["describe"] == "only text"
+
+    # empty describe explicitly clears
+    r = client.put("/api/v1/sucai/up-target", data={"describe": ""})
+    assert r.status_code == 200 and r.json()["describe"] == ""
+
+    # corrupt replacement image -> 400, record intact
+    r = client.put("/api/v1/sucai/up-target", files={"file": ("n.png", b"junk", "image/png")})
+    assert r.status_code == 400
+    assert client.get("/api/v1/sucai/up-target").json()["describe"] == ""
+
+
+def test_image_endpoint_404_when_file_missing_on_disk(client, tmp_path):
+    client.post("/api/v1/sucai",
+                files={"file": ("x.png", _pattern_png(9, 9, seed=27), "image/png")},
+                data={"id": "vanish"})
+    from yocr.config import get_settings
+
+    image_path = get_settings().sucai_dir / "images" / "vanish.png"
+    image_path.unlink()
+    assert client.get("/api/v1/sucai/vanish/image").status_code == 404
+    # finder skips the orphaned entry instead of 500-ing
+    scene = np.zeros((60, 60, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")})
+    assert r.status_code == 200
+    assert "vanish" not in [m["id"] for m in r.json()["results"]]
+    client.delete("/api/v1/sucai/vanish")
+
+
+def test_find_scaled_template_multiscale(client):
+    tpl_bytes = _pattern_png(40, 32, seed=31)
+    tpl = cv2.imdecode(np.frombuffer(tpl_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("t.png", tpl_bytes, "image/png")},
+                    data={"id": "scaled"})
+    assert r.status_code == 201, r.text
+    small = cv2.resize(tpl, None, fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+    scene = np.zeros((120, 160, 3), dtype=np.uint8)
+    scene[40:64, 50:80] = small  # 30x24
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")},
+                    params={"threshold": 0.8})
+    mine = next(m for m in r.json()["results"] if m["id"] == "scaled")
+    assert mine["found"] is True
+    assert abs(mine["scale"] - 0.75) < 0.01
+    assert mine["box"]["xyxy"] == [50, 40, 80, 64]
+
+
+def test_find_template_larger_than_scene_never_found(client):
+    client.post("/api/v1/sucai",
+                files={"file": ("t.png", _pattern_png(300, 400, seed=32), "image/png")},
+                data={"id": "huge"})
+    scene = np.zeros((100, 100, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    # even at threshold 0 an incomparable template must stay found=False, box=None
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")},
+                    params={"threshold": 0.0})
+    assert r.status_code == 200
+    mine = next(m for m in r.json()["results"] if m["id"] == "huge")
+    assert mine["found"] is False and mine["box"] is None and mine["score"] == 0.0
+
+
+def test_find_constant_template_never_found(client):
+    # A solid-color sucai must not phantom-match (NCC undefined -> was ~1.0 everywhere)
+    solid = cv2.imencode(".png", np.full((30, 40, 3), 77, dtype=np.uint8))[1].tobytes()
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("s.png", solid, "image/png")}, data={"id": "solid"})
+    assert r.status_code == 201
+    scene = _pattern_png(120, 160, seed=51)
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", scene, "image/png")},
+                    params={"threshold": 0.5})
+    assert r.status_code == 200
+    mine = next(m for m in r.json()["results"] if m["id"] == "solid")
+    assert mine["found"] is False and mine["box"] is None
+
+
+def test_find_results_sorted_and_top_k(client):
+    a_bytes = _pattern_png(40, 30, seed=41)
+    a = cv2.imdecode(np.frombuffer(a_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("a.png", a_bytes, "image/png")}, data={"id": "sort-a"})
+    assert r.status_code == 201, r.text
+    client.post("/api/v1/sucai",
+                files={"file": ("b.png", _pattern_png(40, 30, seed=42), "image/png")},
+                data={"id": "sort-b"})
+    scene = np.zeros((200, 200, 3), dtype=np.uint8)
+    rng = np.random.default_rng(99)
+    scene[:] = rng.integers(0, 255, scene.shape, dtype=np.uint8)  # non-degenerate scene
+    scene[10:40, 20:60] = a  # only sort-a present
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")}).json()
+    scores = [m["score"] for m in r["results"]]
+    assert scores == sorted(scores, reverse=True)
+    assert r["results"][0]["id"] == "sort-a"
+
+    top2 = client.post("/api/v1/sucai/find",
+                       files={"file": ("s.png", buf.tobytes(), "image/png")},
+                       params={"top_k": 2}).json()["results"]
+    assert len(top2) == 2 and top2[0]["id"] == "sort-a"
+
+
+def test_find_accepts_raw_binary_scene(client):
+    scene = np.zeros((80, 80, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post("/api/v1/sucai/find?threshold=0.9",
+                    content=buf.tobytes(),
+                    headers={"Content-Type": "application/octet-stream"})
+    assert r.status_code == 200
+    assert r.json()["image"] == {"width": 80, "height": 80}
+
+
+def test_find_accepts_image_base64_form_field(client):
+    scene = np.zeros((70, 90, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post("/api/v1/sucai/find",
+                    files={"image_base64": (None, base64.b64encode(buf.tobytes()).decode())})
+    assert r.status_code == 200
+    assert r.json()["image"] == {"width": 90, "height": 70}
+
+
+def test_find_corrupt_scene_400(client):
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", b"junk", "image/png")})
+    assert r.status_code == 400
+
+
+def test_find_json_body_without_image_400(client):
+    r = client.post("/api/v1/sucai/find", json={"unrelated": 1})
+    assert r.status_code == 400

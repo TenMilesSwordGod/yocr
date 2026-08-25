@@ -51,7 +51,7 @@ async def _body_image(request: Request) -> tuple[bytes | None, str | None]:
         return None, None
     try:
         payload = json.loads(body)
-    except json.JSONDecodeError:
+    except ValueError:  # JSONDecodeError + UnicodeDecodeError on binary bodies
         return body, None  # raw binary image
     b64 = payload.get("image_base64") or payload.get("image")
     if isinstance(b64, str) and b64:
@@ -131,7 +131,7 @@ async def _json_body(request: Request) -> dict:
     body = await request.body()
     try:
         parsed = json.loads(body)
-    except json.JSONDecodeError:
+    except ValueError:  # JSONDecodeError + UnicodeDecodeError on binary bodies
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
@@ -180,8 +180,13 @@ async def update_sucai(
     file: bytes | None = File(default=None),
     describe: str | None = Form(default=None),
 ):
-    """更新素材描述和/或替换图片。"""
+    """更新素材描述和/或替换图片；describe 传空字符串表示清空描述。"""
     store = get_sucai_store(request)
+    # FastAPI collapses empty form values to None — recover an explicit
+    # `describe=""` (clear the description) from the raw form.
+    form = await request.form()
+    if "describe" in form:
+        describe = str(form["describe"])
     try:
         record = store.update(sid, describe=describe, image_bytes=file)
     except KeyError as exc:
@@ -226,10 +231,11 @@ async def find_sucai_endpoint(
 ):
     """在场景图(file/image_base64)中比对全部已注册素材并定位命中项。"""
     store = get_sucai_store(request)
-    if not file and image_base64 is None and "multipart/" not in request.headers.get("content-type", "") \
-            and "form" not in request.headers.get("content-type", ""):
-        payload = await _json_body(request)
-        image_base64 = payload.get("image_base64")
+    if not file and image_base64 is None:
+        content_type = request.headers.get("content-type", "")
+        if "multipart/" not in content_type and "form" not in content_type:
+            # JSON body with image_base64, or raw binary image bytes.
+            file, image_base64 = await _body_image(request)
     if not file and not image_base64:
         raise HTTPException(status_code=400, detail="provide multipart 'file' or 'image_base64'")
     try:

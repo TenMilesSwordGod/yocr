@@ -312,12 +312,16 @@ def find_sucai(
             # threshold=0 keeps the best hit even below the decision line so
             # callers can see how close a near-miss was.
             hit = locate_template(scene, template, threshold=0.0)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
+            # Corrupt picture, or meta.json entry whose PNG vanished from disk:
+            # skip the item instead of failing the whole search.
             logger.warning("sucai '%s' unusable, skipped: %s", record["id"], exc)
             continue
         elapsed_ms = (time.perf_counter() - item_started) * 1000
         score = max(0.0, float(hit.confidence)) if hit else 0.0
-        found = score >= threshold
+        # hit is None => template could not be compared at all (e.g. larger
+        # than the scene at every scale): never report it as found.
+        found = hit is not None and score >= threshold
         box = Box.from_xyxy(*hit.xyxy) if hit else None
         matches.append(SucaiFindMatch(
             id=record["id"],

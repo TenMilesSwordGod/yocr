@@ -59,11 +59,21 @@ class SucaiStore:
             return
         try:
             data = json.loads(self.meta_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                self._meta = {str(k): v for k, v in data.items() if isinstance(v, dict)}
         except (json.JSONDecodeError, OSError) as exc:
             logger.error("sucai meta.json unreadable (%s); starting empty", exc)
-            self._meta = {}
+            return
+        if not isinstance(data, dict):
+            logger.error("sucai meta.json has unexpected layout; starting empty")
+            return
+        meta: dict[str, dict] = {}
+        for key, value in data.items():
+            # Tolerate hand-edited/corrupt files: skip malformed records
+            # instead of poisoning every later list/find call.
+            if not isinstance(value, dict) or not isinstance(value.get("id"), str):
+                logger.warning("sucai meta.json: skipping malformed record %r", key)
+                continue
+            meta[str(key)] = value
+        self._meta = meta
 
     def _save_locked(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -117,7 +127,8 @@ class SucaiStore:
     def list(self) -> list[dict]:
         with self._lock:
             items = [dict(v) for v in self._meta.values()]
-        items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+        # Newest first; id tiebreak keeps order stable within the same second.
+        items.sort(key=lambda r: (r.get("created_at") or "", r.get("id") or ""), reverse=True)
         return items
 
     def get(self, sid: str) -> dict:

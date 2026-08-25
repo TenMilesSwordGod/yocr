@@ -54,15 +54,20 @@ def locate_template(
         raise ValueError("empty scene or template image")
     scene_gray = _gray(scene)
     template_gray = _gray(template)
+    # A constant template has zero variance: NCC is undefined and OpenCV
+    # returns ~1.0 everywhere, so such a template would "match" any scene.
+    if float(template_gray.std()) < 1e-6:
+        return None
     best: TemplateHit | None = None
     for factor in dict.fromkeys((1.0, *scales)):  # native scale first for early exit
-        scaled = cv2.resize(
-            template_gray, None, fx=factor, fy=factor, interpolation=cv2.INTER_AREA
-        )
-        th, tw = scaled.shape[:2]
+        # Compute the target size explicitly: fx/fy rounding on tiny templates
+        # can produce an empty dsize and make cv2.resize raise.
+        th = max(1, int(round(template_gray.shape[0] * factor)))
+        tw = max(1, int(round(template_gray.shape[1] * factor)))
         sh, sw = scene_gray.shape[:2]
         if th < 4 or tw < 4 or th > sh or tw > sw:
             continue  # template unusable at this scale
+        scaled = cv2.resize(template_gray, (tw, th), interpolation=cv2.INTER_AREA)
         result = cv2.matchTemplate(scene_gray, scaled, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
         hit = TemplateHit(
