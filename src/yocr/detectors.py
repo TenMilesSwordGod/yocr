@@ -212,9 +212,13 @@ class YOLORegistry:
         classes: Optional[list[int]] = None,
     ) -> tuple[ModelSpec, list[Detection]]:
         spec, loaded = self.get(model)
+        effective_conf = conf if conf is not None else self._settings.conf_threshold
+        # Open-vocabulary prompts score low on small UI glyphs: probe with a
+        # wide net, then filter ourselves so near-misses stay observable.
+        ultra_conf = 0.01 if spec.prompts else effective_conf
         results = loaded.predict(
             source=image,
-            conf=conf if conf is not None else self._settings.conf_threshold,
+            conf=ultra_conf,
             iou=iou if iou is not None else self._settings.iou_threshold,
             imgsz=imgsz or self._settings.infer_size,
             device=self._settings.device,
@@ -238,6 +242,17 @@ class YOLORegistry:
                         xyxy=(x1, y1, x2, y2),
                     )
                 )
+        if spec.prompts:
+            kept = [d for d in detections if d.confidence >= effective_conf]
+            if not kept and detections:
+                top = sorted(detections, key=lambda d: d.confidence, reverse=True)[:3]
+                preview = ", ".join(f"{d.label}:{d.confidence:.3f}@{d.xyxy}" for d in top)
+                logger.warning(
+                    "open-vocab detect '%s': %d raw candidates but none >= conf %.2f; best: %s "
+                    "(try lower conf, larger imgsz, or reword YOCR_ICON_CLASSES)",
+                    spec.name, len(detections), effective_conf, preview,
+                )
+            return spec, kept
         return spec, detections
 
 

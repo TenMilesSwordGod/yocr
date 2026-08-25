@@ -121,6 +121,52 @@ def test_predict_label_resolves_class_type_via_model_names(monkeypatch, image):
     assert detections[0].xyxy == (1.0, 2.0, 3.0, 4.0)
 
 
+def test_open_vocab_low_conf_probe_and_post_filter(monkeypatch, image, caplog):
+    """Prompt models probe at conf=0.01 then filter by requested threshold."""
+    model = _FakeYOLO()
+    model.names = {0: "a gear settings icon"}
+
+    low_box = _FakeBox()
+    low_box.conf = [types.SimpleNamespace(item=lambda: 0.03)]
+    high_box = _FakeBox()
+    high_box.conf = [types.SimpleNamespace(item=lambda: 0.42)]
+
+    captured = {}
+
+    def fake_predict(*args, **kwargs):
+        captured["conf"] = kwargs.get("conf")
+        result = _FakeResult()
+        result.boxes = [low_box, high_box]
+        return [result]
+
+    model.predict = fake_predict
+    monkeypatch.setattr(YOLORegistry, "_load", lambda self, spec: model)
+
+    registry = YOLORegistry(Settings())
+    _, kept = registry.predict(image, model="iconfinder", conf=0.15)
+    assert captured["conf"] == pytest.approx(0.01)  # wide-net probe
+    assert len(kept) == 1 and kept[0].confidence == pytest.approx(0.42)
+
+    _, none_kept = registry.predict(image, model="iconfinder", conf=0.5)
+    assert none_kept == []  # near-misses logged, not returned
+
+
+def test_closed_vocab_conf_passthrough_unchanged(monkeypatch, image):
+    """Non-prompt models still let ultralytics apply the exact conf filter."""
+    captured = {}
+
+    def fake_predict(*args, **kwargs):
+        captured["conf"] = kwargs.get("conf")
+        return []
+
+    model = _FakeYOLO()
+    model.predict = fake_predict
+    monkeypatch.setattr(YOLORegistry, "_load", lambda self, spec: model)
+    registry = YOLORegistry(Settings())
+    registry.predict(image, model="screenparser", conf=0.37)
+    assert captured["conf"] == pytest.approx(0.37)
+
+
 def test_normalize_names_variants():
     from yocr.detectors import _normalize_names
 
