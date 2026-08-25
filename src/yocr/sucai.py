@@ -182,14 +182,4 @@ class SucaiStore:
             return [dict(v) for v in self._meta.values()]
 
 
-def make_thumbnail(image_bytes: bytes, side: int = 240) -> bytes:
-    """Encode a square-fit thumbnail preview (used by API consumers/tests)."""
-    image = decode_image(image_bytes)
-    height, width = image.shape[:2]
-    scale = min(1.0, side / max(height, width))
-    if scale < 1.0:
-        image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-    return encode_png(image)
-
-
-__all__ = ["SucaiStore", "SucaiError", "SucaiConflict", "ID_PATTERN", "make_thumbnail"]
+__all__ = ["SucaiStore", "SucaiError", "SucaiConflict", "ID_PATTERN"]

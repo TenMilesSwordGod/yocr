@@ -24,6 +24,7 @@ ICON_WEIGHTS_URL ?= https://github.com/ultralytics/assets/releases/download/v8.3
 
 .DEFAULT_GOAL := help
 .PHONY: help install run test clean health models-download \
+        frontend-install frontend-build frontend-dev \
         docker-build docker-up docker-down docker-restart docker-logs \
         systemd-install systemd-uninstall systemd-start systemd-stop \
         systemd-restart systemd-status systemd-logs
@@ -77,6 +78,16 @@ models-download: ## 用 uvx hf 下载模型到 .cache/（SKIP_MODELS=1 跳过；
 
 clean: ## 清理测试缓存
 	rm -rf .pytest_cache tests/__pycache__ src/yocr/__pycache__
+
+# ------------------------------ 前端 (Vue SPA) ---------------------------
+frontend-install: ## 安装前端依赖 (frontend/)
+	npm --prefix frontend install --no-audit --no-fund
+
+frontend-build: ## 构建前端到 frontend/dist（服务自动托管在 /）
+	npm --prefix frontend run build
+
+frontend-dev: ## 前端开发模式 (Vite 热更新, 代理 /api 到 127.0.0.1:8000)
+	npm --prefix frontend run dev
 
 # ------------------------------- Docker ---------------------------------
 docker-build: ## 构建镜像

@@ -63,12 +63,14 @@ async def _body_image(request: Request) -> tuple[bytes | None, str | None]:
 @router.get("/healthz", tags=["system"])
 def healthz(request: Request):
     ctx = get_ctx(request)
+    sucai_count = ctx.sucai.count() if getattr(ctx, "sucai", None) else 0
     return {
         "status": "ok",
         "models": ctx.registry.names(),
         "default_model": ctx.registry.default_name(),
         "ocr_loaded": ctx.ocr.loaded,
         "device": ctx.settings.device,
+        "sucai_count": sucai_count,
     }
 
 
@@ -132,6 +134,108 @@ async def _json_body(request: Request) -> dict:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+# --------------------------------------------------------------- sucai ----
+@router.get("/sucai", response_model=SucaiListResponse, tags=["sucai"])
+def list_sucai(request: Request):
+    store = get_sucai_store(request)
+    items = [SucaiInfo.from_record(r) for r in store.list()]
+    return SucaiListResponse(total=len(items), items=items)
+
+
+@router.post("/sucai", response_model=SucaiInfo, status_code=201, tags=["sucai"])
+async def create_sucai(
+    request: Request,
+    file: bytes = File(description="素材图片"),
+    describe: str = Form(default=""),
+    id: str | None = Form(default=None),
+):
+    """注册素材：id 可省略（自动生成），describe 为可选描述。"""
+    store = get_sucai_store(request)
+    try:
+        record = store.create(file, describe=describe, sid=(id or "").strip() or None)
+    except SucaiConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SucaiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid picture: {exc}") from exc
+    return SucaiInfo.from_record(record)
+
+
+@router.get("/sucai/{sid}", response_model=SucaiInfo, tags=["sucai"])
+def get_sucai(sid: str, request: Request):
+    store = get_sucai_store(request)
+    try:
+        return SucaiInfo.from_record(store.get(sid))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/sucai/{sid}", response_model=SucaiInfo, tags=["sucai"])
+async def update_sucai(
+    sid: str,
+    request: Request,
+    file: bytes | None = File(default=None),
+    describe: str | None = Form(default=None),
+):
+    """更新素材描述和/或替换图片。"""
+    store = get_sucai_store(request)
+    try:
+        record = store.update(sid, describe=describe, image_bytes=file)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SucaiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid picture: {exc}") from exc
+    return SucaiInfo.from_record(record)
+
+
+@router.delete("/sucai/{sid}", tags=["sucai"])
+def delete_sucai(sid: str, request: Request):
+    store = get_sucai_store(request)
+    try:
+        store.delete(sid)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"deleted": True, "id": sid}
+
+
+@router.get("/sucai/{sid}/image", tags=["sucai"])
+def get_sucai_image(sid: str, request: Request):
+    store = get_sucai_store(request)
+    try:
+        data = store.read_image(sid)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="sucai image missing on disk") from exc
+    return Response(content=data, media_type="image/png",
+                    headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/sucai/find", response_model=SucaiFindResponse, tags=["sucai"])
+async def find_sucai_endpoint(
+    request: Request,
+    file: bytes | None = File(default=None),
+    image_base64: str | None = Form(default=None),
+    threshold: float = Query(default=0.8, ge=0.0, le=1.0, description="命中判定阈值"),
+    top_k: int = Query(default=0, ge=0, description="只返回得分最高的 N 条；0 = 全部"),
+):
+    """在场景图(file/image_base64)中比对全部已注册素材并定位命中项。"""
+    store = get_sucai_store(request)
+    if not file and image_base64 is None and "multipart/" not in request.headers.get("content-type", "") \
+            and "form" not in request.headers.get("content-type", ""):
+        payload = await _json_body(request)
+        image_base64 = payload.get("image_base64")
+    if not file and not image_base64:
+        raise HTTPException(status_code=400, detail="provide multipart 'file' or 'image_base64'")
+    try:
+        return find_sucai(store, file, image_base64, threshold=threshold, top_k=top_k)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # --------------------------------------------------------------- vision ----

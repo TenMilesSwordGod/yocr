@@ -15,6 +15,8 @@ os.environ.setdefault("HF_HOME", str(Path.cwd() / ".cache" / "huggingface"))
 os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(Path.cwd() / ".cache" / "paddlex"))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
 from .config import get_settings
@@ -60,5 +62,18 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # Dev convenience: the Vite dev server (frontend/) calls these APIs directly.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(api_router)
+
+    # Serve the built Vue SPA at "/" when it has been built (`make frontend-build`).
+    static_dir = Path(settings.static_dir)
+    if (static_dir / "index.html").is_file():
+        app.mount("/", StaticFiles(directory=static_dir, html=True), name="spa")
+        logging.getLogger("yocr.app").info("serving frontend from %s", static_dir)
     return app

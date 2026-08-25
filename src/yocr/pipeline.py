@@ -43,6 +43,7 @@ def _resolve_target(elements: list[Element], *, text: str | None, label: str | N
 class AnalysisContext:
     settings: Settings
     registry: YOLORegistry
+    sucai: SucaiStore | None = None
     _ocr: OCREngine | None = None
 
     @property
@@ -53,7 +54,11 @@ class AnalysisContext:
 
 
 def make_context(settings: Settings) -> AnalysisContext:
-    return AnalysisContext(settings=settings, registry=YOLORegistry(settings))
+    return AnalysisContext(
+        settings=settings,
+        registry=YOLORegistry(settings),
+        sucai=SucaiStore(settings.sucai_dir),
+    )
 
 
 def load_image(payload: bytes | None = None, base64_payload: str | None = None) -> np.ndarray:

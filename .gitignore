@@ -15,3 +15,10 @@ models/
 .token
 # 模型缓存 (make models-download)
 .cache/
+
+# 素材库数据 (YOCR_SUCAI_DIR 默认目录)
+data/
+
+# frontend
+frontend/node_modules/
+frontend/dist/

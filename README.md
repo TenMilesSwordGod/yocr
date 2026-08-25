@@ -11,6 +11,7 @@ FastAPI 提供 REST API，接收截图后按参数选择模型，返回 UI 元�
 - **图文融合**：`/analyze` 将 OCR 文本行按"包含关系"挂到最小的 UI 元素上，直接得到"哪个控件上有什么字"
 - **低延迟**：模型常驻内存、oneDNN 加速（不兼容时自动降级重试）、首次调用后 OCR ~0.7s / 检测 ~2.7s（CPU 实测）
 - **双输入格式**：multipart 文件上传 或 JSON `image_base64`，也接受原始二进制 body
+- **素材库 + 快速定位**：注册素材（id / 图片 / 描述）后，上传期望截图即可与全部素材逐一比对，毫秒级返回"包含哪些素材 + 位置框"，内置 Vue 管理界面
 
 > 📖 **实战教程（中文）**：[docs/tutorial.zh-CN.md](docs/tutorial.zh-CN.md) —— 覆盖有文字控件、弹窗按钮（有字/无字 X）、纯图标、列表多候选、开关/输入框、等待元素出现等场景，附可直接复用的客户端工具类 [`examples/yocr_client.py`](examples/yocr_client.py)。
 
@@ -191,6 +192,10 @@ YOCR_ICON_CLASSES="a gear settings icon, a wifi icon, a download icon" \
 | POST | `/ocr` | PaddleOCR 文字识别 |
 | POST | `/analyze` | 检测 + OCR + 文本归属合并（推荐，同支持 `found`/`matched`） |
 | POST | `/match` | 模板匹配：在场景图(file)中定位模板图(template)，返回 found/score/box/scale |
+| GET/POST | `/sucai` | 素材库列表 / 注册素材（`file` + 可选 `id`、`describe`） |
+| GET/PUT/DELETE | `/sucai/{id}` | 素材详情 / 更新描述与图片 / 删除 |
+| GET | `/sucai/{id}/image` | 素材图片 (PNG) |
+| POST | `/sucai/find` | 场景图与全部素材比对，按 score 降序返回命中项及定位框 |
 
 ### POST /detect
 
@@ -240,6 +245,47 @@ curl -F "file=@screen.png" -F "template=@button.png" \
 也支持 JSON：`{"image_base64": "...", "template_base64": "..."}`。
 客户端：`c.match(tpl_png, scene_png)` → 强类型响应；`c.locate_template(...)`
 直接返回可点击中心坐标。
+
+### 素材库与快速定位（/sucai）
+
+把按钮/图标等小图注册为**素材**（id + 图片 + describe），之后上传任意期望截图，
+一次调用即可与全部素材比对并定位——适合"断言某界面包含某控件"的测试场景：
+
+```bash
+# 注册素材（id 省略则自动生成）
+curl -F "file=@confirm_btn.png" -F "id=btn-confirm" -F "描述: 确认按钮" \
+     http://127.0.0.1:8000/api/v1/sucai
+
+# 期望截图 vs 全部素材：返回每个素材的 score / found / box / center（按 score 降序）
+curl -F "file=@screen.png" "http://127.0.0.1:8000/api/v1/sucai/find?threshold=0.8"
+```
+
+```json
+{
+  "found_any": true, "sucai_count": 3, "threshold": 0.8,
+  "results": [
+    {"id": "btn-confirm", "describe": "确认按钮", "found": true, "score": 0.9812,
+     "scale": 1.0, "box": {"xyxy": [812,540,902,585], "center": [857,562]}, "elapsed_ms": 4.2}
+  ],
+  "timing": {"total_ms": 13.8}
+}
+```
+
+素材持久化在 `YOCR_SUCAI_DIR`（默认 `./data/sucai`，meta.json + PNG），重启不丢、可整目录拷贝。
+
+### 前端管理界面（Vue 3）
+
+```bash
+make frontend-install && make frontend-build   # 构建到 frontend/dist
+make run                                        # 打开 http://127.0.0.1:8000/
+```
+
+- **素材库**：拖拽/选择图片 + id + 描述 → 注册；卡片列表支持预览与删除
+- **查找定位**：上传或 **Ctrl+V 直接粘贴截图** → 与全部素材比对，画布上框出命中位置，
+  结果列表按得分排序（未过阈值的也会显示最高得分，便于调阈值）
+
+前端开发模式（热更新，`/api` 自动代理到 8000）：`make frontend-dev`。
+Docker 镜像已内置构建好的前端，无需额外步骤。
 
 ### POST /ocr
 
@@ -296,22 +342,28 @@ curl -F "file=@screen.png" \
 | `YOCR_OCR_DET_MODEL` / `YOCR_OCR_REC_MODEL` | PP-OCRv5_mobile_* | 换 `PP-OCRv5_server_*` 提精度 |
 | `YOCR_OCR_MKLDNN` | `1` | oneDNN 加速开关（不兼容自动关闭） |
 | `YOCR_LOG_LEVEL` | `INFO` | 日志级别 |
+| `YOCR_SUCAI_DIR` | `data/sucai` | 素材库存储目录（meta.json + 图片） |
+| `YOCR_STATIC_DIR` | `frontend/dist` | 前端构建产物目录（存在 index.html 时托管在 `/`） |
 
 ## 项目结构
 
 ```
 src/yocr/
-├── api.py          # REST 路由 (/detect /ocr /analyze /models /healthz)
-├── app.py          # FastAPI 工厂 + lifespan 预热
+├── api.py          # REST 路由 (/detect /ocr /analyze /sucai /match /models /healthz)
+├── app.py          # FastAPI 工厂 + lifespan 预热 + SPA 静态托管
 ├── cli.py          # yocr serve 命令
 ├── config.py       # YOCR_* 环境变量配置
 ├── detectors.py    # 多 YOLO 模型注册表（懒加载/HF下载/线程安全）
 ├── imaging.py      # 图像编解码（兼容被传输层损坏 \\r\\n 的 PNG）
+├── matching.py     # 检测结果目标匹配（text/label/q）
 ├── ocr_engine.py   # PaddleOCR 封装（2.x/3.x 兼容 + oneDNN 降级）
-├── pipeline.py     # 检测/OCR/文本归属分析流水线
-└── schemas.py      # Pydantic 请求/响应模型
+├── pipeline.py     # 检测/OCR/文本归属分析流水线 + 素材批量比对
+├── schemas.py      # Pydantic 请求/响应模型
+├── sucai.py        # 素材库持久化存储（meta.json + PNG）
+└── template.py     # 多尺度灰度 NCC 模板定位
 examples/
 └── yocr_client.py  # 测试框架可复用的 Python 客户端工具类
+frontend/           # Vue 3 + Vite 素材管理界面（构建后由服务托管）
 docs/
 └── tutorial.zh-CN.md  # 中文实战教程
 tests/              # pytest 单元测试
