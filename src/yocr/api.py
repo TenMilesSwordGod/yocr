@@ -7,10 +7,11 @@ import logging
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request
 
-from .pipeline import AnalysisContext, analyze, detect_only, ocr_only
+from .pipeline import AnalysisContext, analyze, detect_only, match_template_images, ocr_only
 from .schemas import (
     AnalyzeResponse,
     DetectResponse,
+    MatchTemplateResponse,
     ModelsResponse,
     ModelInfo,
     OcrResponse,
@@ -77,6 +78,48 @@ def list_models(request: Request):
             error=ctx.registry.last_error(spec.name),
         ))
     return ModelsResponse(default_model=ctx.registry.default_name(), models=infos)
+
+
+@router.post("/match", response_model=MatchTemplateResponse, tags=["vision"])
+async def match_endpoint(
+    request: Request,
+    file: bytes | None = File(default=None),
+    template: bytes | None = File(default=None),
+    image_base64: str | None = Form(default=None),
+    template_base64: str | None = Form(default=None),
+    threshold: float = Query(default=0.8, ge=0.0, le=1.0, description="匹配置信度阈值"),
+):
+    """在场景图(file/image_base64)中定位模板图(template/template_base64)。"""
+    ctx = get_ctx(request)
+    if "multipart/" not in request.headers.get("content-type", "") and "form" not in request.headers.get("content-type", ""):
+        payload = await _json_body(request)
+        image_base64 = payload.get("image_base64")
+        template_base64 = payload.get("template_base64")
+    try:
+        return match_template_images(
+            file, image_base64, template, template_base64, threshold=threshold
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+async def _json_body(request: Request) -> dict:
+    """Parse a JSON request body into a dict.
+
+    Args:
+        request: Incoming FastAPI request.
+
+    Returns:
+        dict: Parsed body; empty dict when the body is not JSON.
+    """
+    import json
+
+    body = await request.body()
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 # --------------------------------------------------------------- vision ----

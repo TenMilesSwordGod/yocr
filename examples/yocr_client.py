@@ -165,6 +165,30 @@ class AnalyzeResponse(BaseModel):
     timing: Timing = Field(description="耗时统计")
 
 
+class MatchTemplateResponse(BaseModel):
+    """POST /match 响应：模板小图在场景大图中的定位结果。
+
+    Attributes:
+        found: 是否找到不低于阈值的匹配。
+        score: 匹配置信度 [0, 1]；未找到为 0。
+        threshold: 本次请求使用的判定阈值。
+        scale: 命中时的模板缩放系数（跨 DPI 场景）。
+        box: 命中区域外接框；未找到为 None。
+        image: 场景图尺寸。
+        template: 模板图尺寸。
+        timing: 耗时统计。
+    """
+
+    found: bool = Field(default=False, description="是否命中阈值")
+    score: float = Field(default=0.0, description="匹配置信度 0~1")
+    threshold: float = Field(description="判定阈值")
+    scale: float = Field(default=1.0, description="命中时模板缩放系数")
+    box: Box | None = Field(default=None, description="命中区域外接框")
+    image: ImageInfo = Field(description="场景图尺寸")
+    template: ImageInfo = Field(description="模板图尺寸")
+    timing: Timing = Field(description="耗时统计")
+
+
 class ModelInfo(BaseModel):
     """注册表中单个模型的详情。
 
@@ -367,6 +391,64 @@ class YocrClient:
         )
         r.raise_for_status()
         return model_type.model_validate(r.json())  # dict -> 强类型模型
+
+    # ------------------------------------------------------- 模板定位 --
+    def match(self, template: bytes, scene: bytes, *, threshold: float = 0.8) -> MatchTemplateResponse:
+        """在场景截图中定位模板小图（第一张图在第二张图中的位置）。
+
+        Args:
+            template: 模板小图的原始字节（要找的控件/图标截图）。
+            scene: 场景大图的原始字节（通常是整屏截图）。
+            threshold: 匹配置信度阈值 [0, 1]，低于该值视为未找到。
+
+        Returns:
+            MatchTemplateResponse: found/score/box/scale 与两张图尺寸。
+
+        Raises:
+            httpx.HTTPError: 网络/超时/HTTP 状态错误。
+            httpx.HTTPStatusError: 400 图片无效或缺失。
+        """
+        r = self.session.post(  # 双 multipart 字段一次上传
+            f"{self.base_url}/match",
+            params={"threshold": threshold},
+            files={
+                "file": ("scene.png", scene, "image/png"),
+                "template": ("template.png", template, "image/png"),
+            },
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        return MatchTemplateResponse.model_validate(r.json())
+
+    def locate_template(self, template: bytes, scene: bytes, *,
+                        threshold: float = 0.8) -> tuple[int, int] | None:
+        """模板匹配一步拿到可点击中心坐标。
+
+        Args:
+            template: 模板小图原始字节。
+            scene: 场景大图原始字节。
+            threshold: 匹配置信度阈值。
+
+        Returns:
+            tuple[int, int] | None: 命中区域中心 (cx, cy)；未找到 None。
+        """
+        result = self.match(template, scene, threshold=threshold)
+        return self.center_box(result.box) if result.found and result.box else None
+
+    @staticmethod
+    def center_box(box: Box | None) -> tuple[int, int] | None:
+        """取任意 Box 的中心坐标。
+
+        Args:
+            box: 目标矩形；None 直接透传。
+
+        Returns:
+            tuple[int, int] | None: (cx, cy)；入参为 None 时返回 None。
+        """
+        if box is None:
+            return None
+        cx, cy = box.center
+        return int(cx), int(cy)
 
     # ------------------------------------------------------------- 定位 --
     @staticmethod
@@ -601,6 +683,7 @@ __all__ = [
     "Element",
     "HealthzResponse",
     "ImageInfo",
+    "MatchTemplateResponse",
     "ModelInfo",
     "ModelsResponse",
     "OcrResponse",

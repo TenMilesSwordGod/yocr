@@ -100,3 +100,59 @@ def test_cache_env_anchored_to_project(monkeypatch):
 def test_corrupt_base64_image_400(client):
     r = client.post("/api/v1/ocr", json={"image_base64": base64.b64encode(b"junk").decode()})
     assert r.status_code == 400
+
+
+def _pattern_png(tmp_path, name, width, height, seed):
+    import cv2
+
+    from PIL import Image
+
+    rng = np.random.default_rng(seed)
+    arr = rng.integers(0, 255, size=(height, width, 3), dtype=np.uint8)
+    path = tmp_path / name
+    Image.fromarray(arr).save(path)
+    return path.read_bytes()
+
+
+def test_match_template_found(client, tmp_path_factory):
+    import cv2
+
+    tmp = tmp_path_factory.mktemp("match")
+    template_bytes = _pattern_png(tmp, "tpl.png", 40, 30, seed=7)
+    scene = np.zeros((200, 300, 3), dtype=np.uint8)
+    tpl = cv2.imdecode(np.frombuffer(template_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    scene[60:90, 100:140] = tpl  # paste at a known offset
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post(
+        "/api/v1/match",
+        files={"file": ("scene.png", buf.tobytes(), "image/png"),
+               "template": ("t.png", template_bytes, "image/png")},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] is True
+    assert body["score"] >= 0.99
+    assert body["box"]["xyxy"] == [100, 60, 140, 90]
+    assert body["box"]["center"] == [120, 75]
+    assert body["template"] == {"width": 40, "height": 30}
+
+
+def test_match_template_not_found(client, tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("match2")
+    template_bytes = _pattern_png(tmp, "tpl.png", 40, 30, seed=1)
+    scene_bytes = _pattern_png(tmp, "scene.png", 200, 300, seed=2)  # unrelated noise
+    r = client.post(
+        "/api/v1/match",
+        files={"file": ("scene.png", scene_bytes, "image/png"),
+               "template": ("t.png", template_bytes, "image/png")},
+        data={"threshold": "0.99"},
+    )
+    assert r.status_code == 200
+    assert r.json()["found"] is False
+    assert r.json()["box"] is None
+
+
+def test_match_template_missing_template_400(client, png_b64):
+    r = client.post("/api/v1/match", json={"image_base64": png_b64})
+    assert r.status_code == 400

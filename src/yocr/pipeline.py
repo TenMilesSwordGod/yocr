@@ -20,10 +20,12 @@ from .schemas import (
     DetectResponse,
     Element,
     ImageInfo,
+    MatchTemplateResponse,
     OcrResponse,
     TextLine,
     Timing,
 )
+from .template import locate_template
 
 logger = logging.getLogger("yocr.pipeline")
 
@@ -221,4 +223,53 @@ def detect_only(ctx: AnalysisContext, image_bytes: bytes | None, base64_image: s
     )
 
 
-__all__ = ["AnalysisContext", "make_context", "analyze", "detect_only", "ocr_only", "attach_texts"]
+def match_template_images(
+    scene_bytes: bytes | None,
+    scene_b64: str | None,
+    template_bytes: bytes | None,
+    template_b64: str | None,
+    *,
+    threshold: float = 0.8,
+) -> MatchTemplateResponse:
+    """Locate a small template image inside a larger scene screenshot.
+
+    Args:
+        scene_bytes: Raw scene image bytes (multipart upload).
+        scene_b64: Scene image as base64 (JSON body).
+        template_bytes: Raw template image bytes.
+        template_b64: Template image as base64.
+        threshold: Minimum normalized-correlation score to count as found.
+
+    Returns:
+        MatchTemplateResponse: found/score/box/scale plus both image sizes.
+
+    Raises:
+        ValueError: Missing or corrupted images.
+    """
+    started = time.perf_counter()
+    scene = load_image(scene_bytes, scene_b64)
+    template = load_image(template_bytes, template_b64)
+    hit = locate_template(scene, template, threshold=threshold)
+    height, width = scene.shape[:2]
+    theight, twidth = template.shape[:2]
+    return MatchTemplateResponse(
+        found=hit is not None,
+        score=round(hit.confidence, 4) if hit else 0.0,
+        threshold=threshold,
+        scale=hit.scale if hit else 1.0,
+        box=Box.from_xyxy(*hit.xyxy) if hit else None,
+        image=ImageInfo(width=width, height=height),
+        template=ImageInfo(width=twidth, height=theight),
+        timing=Timing(total_ms=round((time.perf_counter() - started) * 1000, 1)),
+    )
+
+
+__all__ = [
+    "AnalysisContext",
+    "make_context",
+    "analyze",
+    "detect_only",
+    "ocr_only",
+    "attach_texts",
+    "match_template_images",
+]

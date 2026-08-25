@@ -190,6 +190,7 @@ YOCR_ICON_CLASSES="a gear settings icon, a wifi icon, a download icon" \
 | POST | `/detect` | YOLO 元素检测（支持 `text`/`label`/`q` 目标参数，返回 `found`/`matched`） |
 | POST | `/ocr` | PaddleOCR 文字识别 |
 | POST | `/analyze` | 检测 + OCR + 文本归属合并（推荐，同支持 `found`/`matched`） |
+| POST | `/match` | 模板匹配：在场景图(file)中定位模板图(template)，返回 found/score/box/scale |
 
 ### POST /detect
 
@@ -216,6 +217,29 @@ Query 参数：`model`（别名）、`conf`、`iou`、`imgsz`（推理分辨率�
   "timing": {"total_ms": 2692.1, "detect_ms": 2689.0, "ocr_ms": null}
 }
 ```
+
+### POST /match：两张图模板定位
+
+上传**模板小图**与**场景大图**，返回第一张在第二张中的位置（多尺度灰度 NCC，
+毫秒级、无需模型、跨 DPI 自动缩放尝试）：
+
+```bash
+curl -F "file=@screen.png" -F "template=@button.png" \
+     "http://127.0.0.1:8000/api/v1/match?threshold=0.8"
+```
+
+```json
+{
+  "found": true, "score": 0.9731, "threshold": 0.8, "scale": 1.0,
+  "box": {"xyxy": [100,60,140,90], "center": [120,75]},
+  "image": {"width": 1080, "height": 600}, "template": {"width": 40, "height": 30},
+  "timing": {"total_ms": 12.5}
+}
+```
+
+也支持 JSON：`{"image_base64": "...", "template_base64": "..."}`。
+客户端：`c.match(tpl_png, scene_png)` → 强类型响应；`c.locate_template(...)`
+直接返回可点击中心坐标。
 
 ### POST /ocr
 

@@ -74,6 +74,30 @@ class AnalyzeResponse(BaseModel):
     timing: Timing
 
 
+class MatchTemplateResponse(BaseModel):
+    """POST /match 响应：模板小图在场景大图中的定位结果。
+
+    Attributes:
+        found: 是否找到不低于阈值的匹配。
+        score: 匹配置信度 [0, 1]；未找到为 0。
+        threshold: 本次请求使用的判定阈值。
+        scale: 命中时的模板缩放系数（跨 DPI 场景）。
+        box: 命中区域外接框；未找到为 None。
+        image: 场景图尺寸。
+        template: 模板图尺寸。
+        timing: 耗时统计。
+    """
+
+    found: bool = Field(default=False, description="是否命中阈值")
+    score: float = Field(default=0.0, description="匹配置信度 0~1")
+    threshold: float = Field(description="判定阈值")
+    scale: float = Field(default=1.0, description="命中时模板缩放系数")
+    box: Optional[Box] = Field(default=None, description="命中区域外接框")
+    image: ImageInfo = Field(description="场景图尺寸")
+    template: ImageInfo = Field(description="模板图尺寸")
+    timing: Timing = Field(description="耗时统计")
+
+
 class ModelInfo(BaseModel):
     name: str
     source: str
