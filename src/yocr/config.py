@@ -72,6 +72,9 @@ class Settings:
     # Extra model aliases: "name=path_or_hf_id,name2=path2.pt"
     model_aliases_raw: str = field(default_factory=lambda: _env("YOCR_MODEL_ALIASES", ""))
 
+    # IconFinder open-vocabulary classes (comma separated); empty => builtin defaults
+    icon_prompts_raw: tuple[str, ...] = field(default_factory=lambda: _env_list("YOCR_ICON_CLASSES"))
+
     log_level: str = field(default_factory=lambda: _env("YOCR_LOG_LEVEL", "INFO"))
 
 

@@ -18,18 +18,47 @@ logger = logging.getLogger("yocr.detectors")
 
 DEFAULT_MODEL = "android_ui_detection_yolov8"
 DEFAULT_MODEL_REPO = "yasirfaizahmed/android_ui_detection_yolov8"
+ICONFINDER_MODEL = "IconFinder"
+ICONFINDER_WEIGHTS_URL = (
+    "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8s-worldv2.pt"
+)
+DEFAULT_ICON_PROMPTS: tuple[str, ...] = (
+    "a gear settings icon",
+    "a wifi signal icon",
+    "a bluetooth icon",
+    "a battery icon",
+    "a search magnifying glass icon",
+    "a back arrow icon",
+    "a home icon",
+    "a camera icon",
+    "a phone dialer icon",
+    "a chat message bubble icon",
+    "a play button icon",
+    "a trash delete icon",
+    "a plus add icon",
+    "a hamburger menu icon",
+    "a star favorite icon",
+    "a share icon",
+    "a padlock icon",
+    "a bell notification icon",
+    "a microphone icon",
+    "a download arrow icon",
+)
 
 
 @dataclass(frozen=True)
 class ModelSpec:
     name: str
-    source: str  # local .pt path (relative to models_dir) or HF hub id
+    source: str  # local .pt path, HF hub id or http(s) url
+    prompts: tuple[str, ...] = ()  # non-empty => open-vocabulary model (YOLO-World)
 
 
 def _builtin_specs(settings: Settings) -> dict[str, ModelSpec]:
+    prompts = settings.icon_prompts_raw or DEFAULT_ICON_PROMPTS
     specs = {
         DEFAULT_MODEL.lower(): ModelSpec(DEFAULT_MODEL, DEFAULT_MODEL_REPO),
         "screenparser": ModelSpec("ScreenParser", "docling-project/ScreenParser"),
+        ICONFINDER_MODEL.lower(): ModelSpec(ICONFINDER_MODEL, ICONFINDER_WEIGHTS_URL, prompts=prompts),
     }
     for alias, source in parse_model_aliases(settings.model_aliases_raw).items():
         specs[alias] = ModelSpec(alias, source)
@@ -92,6 +121,8 @@ class YOLORegistry:
             if Path(local).is_file():
                 return str(local)
         source = spec.source
+        if source.startswith(("http://", "https://")):
+            return source  # ultralytics downloads remote weights itself
         if "/" in source:
             from huggingface_hub import hf_hub_download
 
@@ -112,7 +143,11 @@ class YOLORegistry:
 
         logger.info("loading YOLO model '%s' from %s", spec.name, resolved)
         model = YOLO(resolved)
-        names = _normalize_names(getattr(model, "names", None))
+        if spec.prompts:
+            model.set_classes(list(spec.prompts))
+            names = {i: str(p) for i, p in enumerate(spec.prompts)}
+        else:
+            names = _normalize_names(getattr(model, "names", None))
         if not names:
             logger.warning("model '%s' exposes no usable class names; labels will be numeric", spec.name)
         with self._global_lock:

@@ -8,7 +8,13 @@ import pytest
 from fastapi import HTTPException
 
 from yocr.config import Settings
-from yocr.detectors import DEFAULT_MODEL, DEFAULT_MODEL_REPO, YOLORegistry
+from yocr.detectors import (
+    DEFAULT_ICON_PROMPTS,
+    DEFAULT_MODEL,
+    DEFAULT_MODEL_REPO,
+    ICONFINDER_WEIGHTS_URL,
+    YOLORegistry,
+)
 from yocr.pipeline import AnalysisContext, detect, make_context
 
 
@@ -135,6 +141,51 @@ def test_resolve_source_prefers_local_file(tmp_path):
     registry = YOLORegistry(Settings(models_dir=tmp_path))
     resolved = registry._resolve_source(registry.spec(DEFAULT_MODEL))  # noqa: SLF001
     assert resolved == str((tmp_path / "android_ui_detection_yolov8.pt").resolve())
+
+
+def test_resolve_source_passes_http_url_through():
+    registry = YOLORegistry(Settings())
+    resolved = registry._resolve_source(registry.spec("iconfinder"))  # noqa: SLF001
+    assert resolved == ICONFINDER_WEIGHTS_URL
+
+
+def test_builtin_iconfinder_spec_uses_prompts():
+    settings = Settings()
+    spec = YOLORegistry(settings).spec("iconfinder")
+    assert spec.name == "IconFinder"
+    assert spec.prompts == DEFAULT_ICON_PROMPTS
+    assert "gear" in spec.prompts[0]
+
+
+def test_custom_icon_classes_env(monkeypatch):
+    monkeypatch.setenv("YOCR_ICON_CLASSES", "gear icon, wifi icon")
+    spec = YOLORegistry(Settings()).spec("iconfinder")
+    assert spec.prompts == ("gear icon", "wifi icon")
+
+
+def test_load_applies_prompt_names(monkeypatch):
+    class _WorldModel:
+        def __init__(self, source: str) -> None:
+            self.source = source  # 记录传入 YOLO() 的权重地址
+            self.names = {0: "coco-class"}  # 原始 COCO 类别，set_classes 后应被覆盖
+
+        def set_classes(self, prompts) -> None:
+            self.names = {i: str(p) for i, p in enumerate(prompts)}
+
+    created: dict[str, object] = {}
+
+    def fake_yolo(source: str) -> _WorldModel:
+        model = _WorldModel(source)
+        created["source"] = source
+        return model
+
+    monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=fake_yolo))
+    monkeypatch.setenv("YOCR_ICON_CLASSES", "gear icon, wifi icon")
+    registry = YOLORegistry(Settings())
+    _, model = registry.get("iconfinder")
+    assert created["source"] == ICONFINDER_WEIGHTS_URL  # http 直链透传到 YOLO()
+    assert model.names == {0: "gear icon", 1: "wifi icon"}
+    assert registry.classes("iconfinder") == {"0": "gear icon", "1": "wifi icon"}
 
 
 def test_resolve_source_downloads_from_hf_when_no_local_file(tmp_path, monkeypatch):

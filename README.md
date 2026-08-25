@@ -146,6 +146,7 @@ uvx --from "huggingface_hub[cli]" hf download PaddlePaddle/PP-OCRv5_mobile_det
 |---|---|---|
 | `android_ui_detection_yolov8` | 本地文件优先，缺失时 HF 自动下载 | 放 `.pt` 到 `./models/android_ui_detection_yolov8.pt` 可覆盖；默认源 `yasirfaizahmed/android_ui_detection_yolov8` |
 | `ScreenParser` | HuggingFace 自动下载 | `docling-project/ScreenParser`，55 类 UI 元素 |
+| `IconFinder` | GitHub 直链自动下载 | YOLO-World 开放词汇模型，按**文字**找具体图标（设置齿轮/wifi/蓝牙/返回箭头…）；词表用 `YOCR_ICON_CLASSES` 自定义（逗号分隔） |
 
 自定义别名：
 
@@ -154,6 +155,26 @@ YOCR_MODEL_ALIASES="ui=android_ui_detection_yolov8.pt,mydet=org/repo/best.pt"
 ```
 
 请求时用 `?model=<别名>` 选择；缺省为 `android_ui_detection_yolov8`。
+
+### IconFinder：按文字找具体图标（设置齿轮等）
+
+通用 UI 检测器只会说 "App Icon"；`IconFinder`（YOLO-World 开放词汇）能直接认出
+具体是哪个图标。内置 20 个常见类别（settings 齿轮、wifi、蓝牙、返回箭头、home、
+相机、搜索、菜单、删除…），首次使用自动下载权重与 CLIP 文本编码器（需联网一次）。
+
+```bash
+# 找设置齿轮图标，直接点击坐标
+curl -F "file=@screen.png" \
+     "http://127.0.0.1:8000/api/v1/detect?model=iconfinder&label=gear&conf=0.15"
+
+# 自定义词表后重启
+YOCR_ICON_CLASSES="a gear settings icon, a wifi icon, a download icon" \
+    make systemd-restart
+```
+
+客户端用法：`c.find_icon(png, labels=["gear settings icon"])` 或
+`c.locate(png, model="iconfinder", label="gear")`。
+开放词汇检测建议把 `conf` 降到 0.1~0.2 再按置信度筛选。
 
 ## API
 
