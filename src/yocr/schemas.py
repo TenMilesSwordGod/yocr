@@ -79,6 +79,7 @@ class ModelInfo(BaseModel):
     source: str
     loaded: bool
     classes: dict[str, str] = Field(default_factory=dict, description="id -> class name")
+    error: Optional[str] = Field(default=None, description="最近一次加载失败原因；成功加载后为 null")
 
 
 class ModelsResponse(BaseModel):

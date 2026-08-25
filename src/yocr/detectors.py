@@ -17,6 +17,7 @@ from .imaging import resolve_model_file
 logger = logging.getLogger("yocr.detectors")
 
 DEFAULT_MODEL = "android_ui_detection_yolov8"
+DEFAULT_MODEL_REPO = "yasirfaizahmed/android_ui_detection_yolov8"
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ class ModelSpec:
 
 def _builtin_specs(settings: Settings) -> dict[str, ModelSpec]:
     specs = {
-        DEFAULT_MODEL.lower(): ModelSpec(DEFAULT_MODEL, "android_ui_detection_yolov8.pt"),
+        DEFAULT_MODEL.lower(): ModelSpec(DEFAULT_MODEL, DEFAULT_MODEL_REPO),
         "screenparser": ModelSpec("ScreenParser", "docling-project/ScreenParser"),
     }
     for alias, source in parse_model_aliases(settings.model_aliases_raw).items():
@@ -51,6 +52,7 @@ class YOLORegistry:
         self._specs = _builtin_specs(settings)
         self._models: dict[str, object] = {}
         self._classes: dict[str, dict[int, str]] = {}
+        self._errors: dict[str, str] = {}
         self._locks: dict[str, threading.Lock] = {}
         self._global_lock = threading.Lock()
 
@@ -78,15 +80,18 @@ class YOLORegistry:
     # -- loading ----------------------------------------------------------
     _WEIGHT_EXTS = (".pt", ".onnx", ".engine", ".torchscript", ".tflite", ".xml", ".mlpackage")
 
-    def _resolve_source(self, source: str) -> str:
+    def _resolve_source(self, spec: ModelSpec) -> str:
         """Resolve a spec source to something YOLO() accepts.
 
-        - existing local file path (absolute or relative to models_dir)
-        - "repo_id/file.pt" or bare HF repo id ("org/name") -> hf_hub_download
+        Resolution order:
+        1. existing local file: source path or `<name>.pt` inside models_dir
+        2. HF hub id ("repo_id" or "repo_id/file.pt") -> hf_hub_download
         """
-        local = resolve_model_file(self._settings.models_dir, source)
-        if Path(local).is_file():
-            return str(local)
+        for candidate in dict.fromkeys((spec.source, f"{spec.name}.pt")):
+            local = resolve_model_file(self._settings.models_dir, candidate)
+            if Path(local).is_file():
+                return str(local)
+        source = spec.source
         if "/" in source:
             from huggingface_hub import hf_hub_download
 
@@ -102,9 +107,9 @@ class YOLORegistry:
         )
 
     def _load(self, spec: ModelSpec):
+        resolved = self._resolve_source(spec)
         from ultralytics import YOLO
 
-        resolved = self._resolve_source(spec.source)
         logger.info("loading YOLO model '%s' from %s", spec.name, resolved)
         model = YOLO(resolved)
         names = {int(k): str(v) for k, v in (model.names or {}).items()}
@@ -122,8 +127,17 @@ class YOLORegistry:
         with lock:
             model = self._models.get(spec.name)
             if model is None:
-                model = self._load(spec)
+                try:
+                    model = self._load(spec)
+                except Exception as exc:  # noqa: BLE001 - keep reason visible via last_error()
+                    self._errors[spec.name] = f"{type(exc).__name__}: {exc}"
+                    raise
+                self._errors.pop(spec.name, None)
         return spec, model
+
+    def last_error(self, name: str) -> Optional[str]:
+        """Last load failure for a registered model (display name), if any."""
+        return self._errors.get(name)
 
     def classes(self, name: Optional[str]) -> dict[str, str]:
         spec = self.spec(name)

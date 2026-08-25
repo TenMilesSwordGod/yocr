@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
+
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 from fastapi import FastAPI
 

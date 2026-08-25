@@ -117,7 +117,10 @@ make systemd-restart && make health    # 应输出 "ocr_loaded": true
 - `HF_HOME`：ScreenParser 等走 `hf_hub_download` 的权重位置
 - `HF_HUB_OFFLINE=1`：只读缓存、不再联网尝试（避免启动卡超时）
 
-自训模型 `android_ui_detection_yolov8.pt` 不走 hf，直接放进服务器 `models/` 目录即可。
+默认 UI 检测模型 `android_ui_detection_yolov8` 自动从 HuggingFace 下载
+（`yasirfaizahmed/android_ui_detection_yolov8`，Apache-2.0）；`make models-download`
+会把 `best.pt` 预下载进 `HF_HOME` 缓存供离线使用。把自己的 `.pt` 放进服务器
+`models/android_ui_detection_yolov8.pt` 即可覆盖（本地文件优先）。
 想提精度可换成 server 版：循环里改为 `PP-OCRv5_server_det` / `PP-OCRv5_server_rec`，
 并在 yocr.env 加 `YOCR_OCR_DET_MODEL` / `YOCR_OCR_REC_MODEL` 对应项。
 
@@ -141,7 +144,7 @@ uvx --from "huggingface_hub[cli]" hf download PaddlePaddle/PP-OCRv5_mobile_det
 
 | 名称 | 来源 | 说明 |
 |---|---|---|
-| `android_ui_detection_yolov8` | 本地文件 | 把 `.pt` 权重放到 `./models/android_ui_detection_yolov8.pt` |
+| `android_ui_detection_yolov8` | 本地文件优先，缺失时 HF 自动下载 | 放 `.pt` 到 `./models/android_ui_detection_yolov8.pt` 可覆盖；默认源 `yasirfaizahmed/android_ui_detection_yolov8` |
 | `ScreenParser` | HuggingFace 自动下载 | `docling-project/ScreenParser`，55 类 UI 元素 |
 
 自定义别名：

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 def client():
     os.environ["YOCR_PRELOAD_OCR"] = "0"
     os.environ["YOCR_PRELOAD_MODELS"] = ""
+    os.environ["HF_HUB_OFFLINE"] = "1"
 
     from yocr.app import create_app
 
@@ -45,12 +46,27 @@ def test_models_listing(client):
     models = {m["name"]: m for m in r.json()["models"]}
     assert models["ScreenParser"]["source"] == "docling-project/ScreenParser"
     assert not any(m["loaded"] for m in models.values())  # nothing preloaded
+    assert all(m["error"] is None for m in models.values())  # no failures recorded
+
+
+def test_models_listing_surfaces_load_error(client):
+    ctx = client.app.state.ctx
+    ctx.registry._errors["ScreenParser"] = "RuntimeError: offline cache miss"  # noqa: SLF001
+    try:
+        r = client.get("/api/v1/models")
+        assert r.status_code == 200
+        models = {m["name"]: m for m in r.json()["models"]}
+        assert models["ScreenParser"]["loaded"] is False
+        assert "offline cache miss" in models["ScreenParser"]["error"]
+        assert models["android_ui_detection_yolov8"]["error"] is None
+    finally:
+        ctx.registry._errors.pop("ScreenParser", None)  # noqa: SLF001
 
 
 def test_detect_default_model_missing_weights_404(client, png_b64):
     r = client.post("/api/v1/detect", json={"image_base64": png_b64})
     assert r.status_code == 404
-    assert "not found" in r.json()["detail"]
+    assert "no usable detection model" in r.json()["detail"]
 
 
 def test_detect_unknown_alias_404(client, png_b64):

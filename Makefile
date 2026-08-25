@@ -19,6 +19,7 @@ HF_ENDPOINT     ?= https://hf-mirror.com
 PADDLE_OCR_MODELS ?= PP-OCRv5_mobile_det PP-OCRv5_mobile_rec
 SKIP_MODELS     ?= 0
 HF_OFFLINE      ?= 1
+PRELOAD_MODELS  ?= android_ui_detection_yolov8,screenparser
 
 .DEFAULT_GOAL := help
 .PHONY: help install run test clean health models-download \
@@ -55,6 +56,9 @@ models-download: ## 用 uvx hf 下载模型到 .cache/（SKIP_MODELS=1 跳过；
 	@echo "== ScreenParser -> $(CACHE_DIR)/huggingface"
 	HF_HOME="$(CACHE_DIR)/huggingface" HF_HUB_DISABLE_XET=1 \
 		uvx --from "huggingface_hub[cli]" hf download docling-project/ScreenParser best.pt
+	@echo "== android_ui_detection_yolov8 -> $(CACHE_DIR)/huggingface"
+	HF_HOME="$(CACHE_DIR)/huggingface" HF_HUB_DISABLE_XET=1 \
+		uvx --from "huggingface_hub[cli]" hf download yasirfaizahmed/android_ui_detection_yolov8 best.pt
 	@for m in $(PADDLE_OCR_MODELS); do \
 		echo "== PaddlePaddle/$$m -> paddlex/official_models/$$m"; \
 		HF_HUB_DISABLE_XET=1 uvx --from "huggingface_hub[cli]" hf download "PaddlePaddle/$$m" \
@@ -92,7 +96,8 @@ systemd-install: install models-download ## 安装依赖+下载模型+装 system
 	     -e "s|__OCR_LANG__|$(OCR_LANG)|g" \
 	     -e "s|__HF_HOME__|$(CACHE_DIR)/huggingface|g" \
 	     -e "s|__PADDLE_CACHE__|$(CACHE_DIR)/paddlex|g" \
-	     -e "s|__HF_OFFLINE__|$(HF_OFFLINE)|g" deploy/yocr.service | sudo tee $(SYSTEMD_UNIT) > /dev/null
+	     -e "s|__HF_OFFLINE__|$(HF_OFFLINE)|g" \
+	     -e "s|__PRELOAD_MODELS__|$(PRELOAD_MODELS)|g" deploy/yocr.service | sudo tee $(SYSTEMD_UNIT) > /dev/null
 	sudo systemctl daemon-reload
 	@echo "已安装 $(SYSTEMD_UNIT)  ->  make systemd-start 启动"
 	@echo "模型缓存: $(CACHE_DIR)  |  换机器/换目录时用 CACHE_DIR=... 指定"

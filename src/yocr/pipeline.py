@@ -10,7 +10,7 @@ import numpy as np
 from fastapi import HTTPException
 
 from .config import Settings
-from .detectors import YOLORegistry
+from .detectors import DEFAULT_MODEL, YOLORegistry
 from .imaging import decode_base64_image, decode_image
 from .matching import best_match
 from .ocr_engine import OCREngine, TextItem, get_ocr_engine
@@ -63,10 +63,38 @@ def detect(ctx: AnalysisContext, image: np.ndarray, model: str | None = None, co
            iou: float | None = None, imgsz: int | None = None,
            classes: list[int] | None = None) -> tuple[str, list[Element], float]:
     started = time.perf_counter()
-    try:
-        spec, detections = ctx.registry.predict(image, model=model, conf=conf, iou=iou, imgsz=imgsz, classes=classes)
-    except (FileNotFoundError, KeyError) as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if model:
+        # Explicitly pinned model: strict behavior, missing weights -> 404.
+        try:
+            return _detect_with(ctx, image, model, conf, iou, imgsz, classes, started)
+        except (FileNotFoundError, KeyError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # Default model requested implicitly: fall back to any other registered
+    # model when its weights are absent (fresh servers without models/*.pt).
+    default_key = DEFAULT_MODEL.lower()
+    candidates = [None] + [n for n in ctx.registry.names() if n.lower() != default_key]
+    failures: list[str] = []
+    for candidate in candidates:
+        try:
+            return _detect_with(ctx, image, candidate, conf, iou, imgsz, classes, started)
+        except (FileNotFoundError, ImportError) as exc:
+            name = candidate or DEFAULT_MODEL
+            logger.warning("model '%s' unavailable (%s); trying fallback", name, exc)
+            failures.append(f"{name}: {exc}")
+            ctx.registry._errors.setdefault(name, f"{type(exc).__name__}: {exc}")  # noqa: SLF001
+    raise HTTPException(
+        status_code=404,
+        detail="no usable detection model on this host — " + "; ".join(failures)
+        + ". Fix: place .pt weights in YOCR_MODELS_DIR, pre-download HF weights "
+        "(make models-download / hf download), or register aliases via YOCR_MODEL_ALIASES",
+    )
+
+
+def _detect_with(ctx: AnalysisContext, image: np.ndarray, model: str | None,
+                 conf: float | None, iou: float | None, imgsz: int | None,
+                 classes: list[int] | None, started: float) -> tuple[str, list[Element], float]:
+    spec, detections = ctx.registry.predict(image, model=model, conf=conf, iou=iou, imgsz=imgsz, classes=classes)
     elements = [
         Element(
             id=i,

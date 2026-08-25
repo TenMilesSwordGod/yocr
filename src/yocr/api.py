@@ -69,7 +69,13 @@ def list_models(request: Request):
         classes: dict[str, str] = {}
         if loaded:
             classes = {str(k): v for k, v in ctx.registry._classes.get(spec.name, {}).items()}  # noqa: SLF001
-        infos.append(ModelInfo(name=spec.name, source=spec.source, loaded=loaded, classes=classes))
+        infos.append(ModelInfo(
+            name=spec.name,
+            source=spec.source,
+            loaded=loaded,
+            classes=classes,
+            error=ctx.registry.last_error(spec.name),
+        ))
     return ModelsResponse(default_model=ctx.registry.default_name(), models=infos)
 
 
