@@ -80,6 +80,12 @@ class Settings:
     # `make models-download`; flip to 1 to restore lazy auto-download.
     allow_download: bool = field(default_factory=lambda: _env_bool("YOCR_ALLOW_DOWNLOAD", False))
 
+    # Sucai (素材) template registry storage directory.
+    sucai_dir: Path = field(default_factory=lambda: Path(_env("YOCR_SUCAI_DIR", "data/sucai")))
+
+    # Built SPA directory served at "/" when it exists (see frontend/).
+    static_dir: Path = field(default_factory=lambda: Path(_env("YOCR_STATIC_DIR", "frontend/dist")))
+
     log_level: str = field(default_factory=lambda: _env("YOCR_LOG_LEVEL", "INFO"))
 
 

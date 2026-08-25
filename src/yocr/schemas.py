@@ -109,3 +109,50 @@ class ModelInfo(BaseModel):
 class ModelsResponse(BaseModel):
     default_model: str
     models: list[ModelInfo]
+
+
+class SucaiInfo(BaseModel):
+    """已注册素材的元数据（图片本体经 /sucai/{id}/image 获取）。"""
+
+    id: str = Field(description="素材唯一标识")
+    describe: str = Field(default="", description="素材描述")
+    width: int
+    height: int
+    size_bytes: int = Field(description="PNG 字节数")
+    created_at: str = Field(description="注册时间 (UTC ISO8601)")
+    updated_at: Optional[str] = Field(default=None, description="最近更新时间")
+    image_url: str = Field(description="图片访问路径")
+
+    @classmethod
+    def from_record(cls, record: dict) -> "SucaiInfo":
+        data = {k: v for k, v in record.items() if k in cls.model_fields}
+        return cls(**data, image_url=f"/api/v1/sucai/{record['id']}/image")
+
+
+class SucaiListResponse(BaseModel):
+    total: int
+    items: list[SucaiInfo]
+
+
+class SucaiFindMatch(BaseModel):
+    """单个素材在场景图中的比对结果。"""
+
+    id: str
+    describe: str = ""
+    found: bool = Field(description="score 是否达到阈值")
+    score: float = Field(description="归一化相关度 0~1")
+    scale: float = Field(default=1.0, description="命中时模板缩放系数")
+    box: Optional[Box] = Field(default=None, description="命中区域外接框；未命中为 null")
+    center: Optional[tuple[int, int]] = Field(default=None, description="命中区域中心点")
+    elapsed_ms: float = Field(default=0.0, description="该素材比对耗时")
+
+
+class SucaiFindResponse(BaseModel):
+    """POST /sucai/find 响应：场景图与全部已注册素材逐一模板比对。"""
+
+    image: ImageInfo = Field(description="场景图尺寸")
+    threshold: float
+    sucai_count: int = Field(description="参与比对的素材数量")
+    found_any: bool = Field(default=False, description="是否有任一素材达到阈值")
+    results: list[SucaiFindMatch] = Field(description="按 score 降序排列")
+    timing: Timing

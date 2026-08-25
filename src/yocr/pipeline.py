@@ -22,9 +22,12 @@ from .schemas import (
     ImageInfo,
     MatchTemplateResponse,
     OcrResponse,
+    SucaiFindMatch,
+    SucaiFindResponse,
     TextLine,
     Timing,
 )
+from .sucai import SucaiStore
 from .template import locate_template
 
 logger = logging.getLogger("yocr.pipeline")
@@ -264,6 +267,78 @@ def match_template_images(
     )
 
 
+def find_sucai(
+    store: SucaiStore,
+    scene_bytes: bytes | None,
+    scene_b64: str | None,
+    *,
+    threshold: float = 0.8,
+    top_k: int = 0,
+) -> SucaiFindResponse:
+    """Compare a scene screenshot against every registered sucai template.
+
+    Each sucai picture is located in the scene with multi-scale NCC; results
+    are sorted by score (best first). Items scoring >= threshold are flagged
+    ``found`` and carry their bounding box / clickable center.
+
+    Args:
+        store: Registered sucai library.
+        scene_bytes: Raw scene image bytes (multipart upload).
+        scene_b64: Scene image as base64.
+        threshold: Minimum score to flag a sucai as found.
+        top_k: Keep only the best N results (0 = keep all).
+
+    Returns:
+        SucaiFindResponse: Per-sucai matches sorted by score descending.
+
+    Raises:
+        ValueError: Missing or corrupted scene image.
+    """
+    started = time.perf_counter()
+    scene = load_image(scene_bytes, scene_b64)
+    height, width = scene.shape[:2]
+
+    records = store.iter_records()
+    matches: list[SucaiFindMatch] = []
+    for record in records:
+        item_started = time.perf_counter()
+        try:
+            template = decode_image(store.read_image(record["id"]))
+            # threshold=0 keeps the best hit even below the decision line so
+            # callers can see how close a near-miss was.
+            hit = locate_template(scene, template, threshold=0.0)
+        except ValueError as exc:
+            logger.warning("sucai '%s' unusable, skipped: %s", record["id"], exc)
+            continue
+        elapsed_ms = (time.perf_counter() - item_started) * 1000
+        score = max(0.0, float(hit.confidence)) if hit else 0.0
+        found = score >= threshold
+        box = Box.from_xyxy(*hit.xyxy) if hit else None
+        matches.append(SucaiFindMatch(
+            id=record["id"],
+            describe=record.get("describe", ""),
+            found=found,
+            score=round(score, 4),
+            scale=hit.scale if hit else 1.0,
+            box=box,
+            center=box.center if box else None,
+            elapsed_ms=round(elapsed_ms, 1),
+        ))
+
+    matches.sort(key=lambda m: m.score, reverse=True)
+    if top_k > 0:
+        matches = matches[:top_k]
+    total_ms = (time.perf_counter() - started) * 1000
+    return SucaiFindResponse(
+        image=ImageInfo(width=width, height=height),
+        threshold=threshold,
+        sucai_count=len(records),
+        found_any=any(m.found for m in matches),
+        results=matches,
+        timing=Timing(total_ms=round(total_ms, 1)),
+    )
+
+
 __all__ = [
     "AnalysisContext",
     "make_context",
@@ -272,4 +347,5 @@ __all__ = [
     "ocr_only",
     "attach_texts",
     "match_template_images",
+    "find_sucai",
 ]

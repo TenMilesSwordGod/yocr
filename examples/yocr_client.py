@@ -267,7 +267,7 @@ class YocrClient:
             HealthzResponse: 进程状态、注册模型、OCR 就绪情况与推理设备。
         """
         r = self.session.get(f"{self.base_url}/healthz", timeout=self.timeout)  # 无副作用的探活 GET
-        r.raise_for_status()
+        self._raise_with_detail(r)
         return HealthzResponse.model_validate(r.json())
 
     def models(self) -> ModelsResponse:
@@ -278,7 +278,7 @@ class YocrClient:
             error 非空说明该模型最近一次加载失败。
         """
         r = self.session.get(f"{self.base_url}/models", timeout=self.timeout)  # 只读的模型清单 GET
-        r.raise_for_status()
+        self._raise_with_detail(r)
         return ModelsResponse.model_validate(r.json())
 
     # ------------------------------------------------------------- 识别 --
@@ -366,6 +366,27 @@ class YocrClient:
                               match_mode=match_mode, **kwargs)
         return result.matched if result.found else None
 
+    def _raise_with_detail(self, r: httpx.Response) -> None:
+        """raise_for_status 的增强版：把服务端 JSON detail 拼进异常消息。
+
+        Args:
+            r: 非 2xx 的 httpx 响应。
+
+        Raises:
+            httpx.HTTPStatusError: 始终抛出，消息附带服务端 detail（如有）。
+        """
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = ""  # 服务端返回 JSON detail 时提取，便于直接定位原因
+            try:
+                detail = f" — server: {r.json().get('detail')}"
+            except Exception:  # noqa: BLE001 - 非 JSON 响应保留原始错误即可
+                pass
+            raise httpx.HTTPStatusError(
+                f"{exc}{detail}", request=exc.request, response=exc.response
+            ) from None
+
     def _post(self, path: str, png: bytes, model_type: type[T],
               params: dict | None = None) -> T:
         """上传截图 POST 到指定端点并反序列化为强类型模型。
@@ -389,7 +410,7 @@ class YocrClient:
             files={"file": ("screen.png", png, "image/png")},
             timeout=self.timeout,
         )
-        r.raise_for_status()
+        self._raise_with_detail(r)
         return model_type.model_validate(r.json())  # dict -> 强类型模型
 
     # ------------------------------------------------------- 模板定位 --
@@ -417,7 +438,7 @@ class YocrClient:
             },
             timeout=self.timeout,
         )
-        r.raise_for_status()
+        self._raise_with_detail(r)
         return MatchTemplateResponse.model_validate(r.json())
 
     def locate_template(self, template: bytes, scene: bytes, *,
@@ -519,19 +540,22 @@ class YocrClient:
         el = self.locate(png, text=text, **kwargs)  # 先判定是否在屏
         return self.center(el) if el else None
 
-    def find_icon(self, png: bytes, labels: Iterable[str] = ("App Icon", "Utility Button", "Button"),
+    def find_icon(self, png: bytes, labels: str | Iterable[str] = ("App Icon", "Utility Button", "Button"),
                   region: tuple[int, int, int, int] | None = None, **kwargs) -> tuple[int, int] | None:
         """纯图标（齿轮/返回箭头等无文字控件）：依次尝试多个类别名。
 
         Args:
             png: 截图原始字节。
-            labels: 依次尝试的候选类别名。
+            labels: 候选类别名，字符串或字符串列表；语义图标请配合
+                ``model="iconfinder"`` 使用（如 ``["a gear settings icon"]``）。
             region: 限定搜索区域 (x1,y1,x2,y2)。
             **kwargs: 其余参数透传给 analyze()。
 
         Returns:
             tuple[int, int] | None: 第一个命中的图标中心；全部落空 None。
         """
+        if isinstance(labels, str):
+            labels = (labels,)  # 统一成元组，兼容调用方只传一个名字的写法
         result = self.analyze(png, **kwargs)  # 一次识别供多个类别复用
         for label in labels:  # 按调用方给出的优先级逐个尝试
             el = self.find(result, label=label, region=region)

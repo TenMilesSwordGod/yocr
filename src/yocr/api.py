@@ -6,8 +6,9 @@ import json
 import logging
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request
+from fastapi.responses import Response
 
-from .pipeline import AnalysisContext, analyze, detect_only, match_template_images, ocr_only
+from .pipeline import AnalysisContext, analyze, detect_only, find_sucai, match_template_images, ocr_only
 from .schemas import (
     AnalyzeResponse,
     DetectResponse,
@@ -15,7 +16,11 @@ from .schemas import (
     ModelsResponse,
     ModelInfo,
     OcrResponse,
+    SucaiFindResponse,
+    SucaiInfo,
+    SucaiListResponse,
 )
+from .sucai import SucaiConflict, SucaiError, SucaiStore
 
 logger = logging.getLogger("yocr.api")
 
@@ -24,6 +29,13 @@ router = APIRouter(prefix="/api/v1")
 
 def get_ctx(request: Request) -> AnalysisContext:
     return request.app.state.ctx  # type: ignore[no-any-return]
+
+
+def get_sucai_store(request: Request) -> SucaiStore:
+    store = getattr(request.app.state.ctx, "sucai", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="sucai registry unavailable")
+    return store
 
 
 async def _body_image(request: Request) -> tuple[bytes | None, str | None]:
