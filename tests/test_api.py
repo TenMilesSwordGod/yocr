@@ -84,6 +84,19 @@ def test_missing_image_400(client):
     assert r.status_code == 400
 
 
+def test_cache_env_anchored_to_project(monkeypatch):
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("PADDLE_PDX_CACHE_HOME", raising=False)
+
+    import importlib
+
+    from yocr import app as app_module
+
+    importlib.reload(app_module)  # re-run module-level setdefaults
+    assert app_module.os.environ["HF_HOME"].endswith(".cache/huggingface")
+    assert app_module.os.environ["PADDLE_PDX_CACHE_HOME"].endswith(".cache/paddlex")
+
+
 def test_corrupt_base64_image_400(client):
     r = client.post("/api/v1/ocr", json={"image_base64": base64.b64encode(b"junk").decode()})
     assert r.status_code == 400

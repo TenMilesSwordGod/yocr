@@ -6,8 +6,13 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+# Anchor weight caches to <cwd>/.cache so manual starts (`make run`) resolve the
+# same caches that `make models-download` and the systemd unit populate.
+os.environ.setdefault("HF_HOME", str(Path.cwd() / ".cache" / "huggingface"))
+os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(Path.cwd() / ".cache" / "paddlex"))
 
 from fastapi import FastAPI
 
