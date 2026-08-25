@@ -30,8 +30,8 @@ def _env_bool(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).lower() in ("1", "true", "yes", "on")
 
 
-def _env_list(name: str) -> tuple[str, ...]:
-    raw = os.getenv(name, "")
+def _env_list(name: str, default: str = "") -> tuple[str, ...]:
+    raw = os.getenv(name, default)
     return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
@@ -65,8 +65,9 @@ class Settings:
     ocr_det_model: str = field(default_factory=lambda: _env("YOCR_OCR_DET_MODEL", "PP-OCRv5_mobile_det"))
     ocr_rec_model: str = field(default_factory=lambda: _env("YOCR_OCR_REC_MODEL", "PP-OCRv5_mobile_rec"))
 
-    # Model aliases pre-loaded at startup (comma separated registry names).
-    preload_models: tuple[str, ...] = field(default_factory=lambda: _env_list("YOCR_PRELOAD_MODELS"))
+    # Models pre-loaded at startup. Unset => "all" builtin models; set to
+    # empty string to disable preloading entirely; or a comma list of names.
+    preload_models: tuple[str, ...] = field(default_factory=lambda: _env_list("YOCR_PRELOAD_MODELS", "all"))
     preload_ocr: bool = field(default_factory=lambda: _env_bool("YOCR_PRELOAD_OCR", True))
 
     # Extra model aliases: "name=path_or_hf_id,name2=path2.pt"
@@ -74,6 +75,10 @@ class Settings:
 
     # IconFinder open-vocabulary classes (comma separated); empty => builtin defaults
     icon_prompts_raw: tuple[str, ...] = field(default_factory=lambda: _env_list("YOCR_ICON_CLASSES"))
+
+    # Allow runtime weight downloads (HF/GitHub). Default off: provision with
+    # `make models-download`; flip to 1 to restore lazy auto-download.
+    allow_download: bool = field(default_factory=lambda: _env_bool("YOCR_ALLOW_DOWNLOAD", False))
 
     log_level: str = field(default_factory=lambda: _env("YOCR_LOG_LEVEL", "INFO"))
 

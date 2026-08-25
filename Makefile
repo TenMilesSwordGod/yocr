@@ -19,7 +19,8 @@ HF_ENDPOINT     ?= https://hf-mirror.com
 PADDLE_OCR_MODELS ?= PP-OCRv5_mobile_det PP-OCRv5_mobile_rec
 SKIP_MODELS     ?= 0
 HF_OFFLINE      ?= 1
-PRELOAD_MODELS  ?= android_ui_detection_yolov8,screenparser
+PRELOAD_MODELS  ?= all
+ICON_WEIGHTS_URL ?= https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8s-worldv2.pt
 
 .DEFAULT_GOAL := help
 .PHONY: help install run test clean health models-download \
@@ -59,6 +60,15 @@ models-download: ## 用 uvx hf 下载模型到 .cache/（SKIP_MODELS=1 跳过；
 	@echo "== android_ui_detection_yolov8 -> $(CACHE_DIR)/huggingface"
 	HF_ENDPOINT="$(HF_ENDPOINT)" HF_HOME="$(CACHE_DIR)/huggingface" HF_HUB_DISABLE_XET=1 \
 		uvx --from "huggingface_hub[cli]" hf download yasirfaizahmed/android_ui_detection_yolov8 best.pt
+	@echo "== yolov8s-worldv2 (IconFinder) -> $(CURDIR)/models/"
+	@mkdir -p "$(CURDIR)/models"
+	curl -fL --retry 3 -o "$(CURDIR)/models/yolov8s-worldv2.pt" "$(ICON_WEIGHTS_URL)"
+	@if [ -x "$(CURDIR)/.venv/bin/python" ]; then \
+		echo "== 预热 IconFinder CLIP 文本编码器缓存 (best-effort)"; \
+		HF_HOME="$(CACHE_DIR)/huggingface" HF_HUB_DISABLE_XET=1 \
+		"$(CURDIR)/.venv/bin/python" -c "from ultralytics import YOLO; m = YOLO('$(CURDIR)/models/yolov8s-worldv2.pt'); m.set_classes(['a gear settings icon'])" \
+		|| echo "!! CLIP 预热失败：服务首次加载 IconFinder 时需联网一次"; \
+	else echo "!! .venv 不存在，跳过 CLIP 预热（先 make install）"; fi
 	@for m in $(PADDLE_OCR_MODELS); do \
 		echo "== PaddlePaddle/$$m -> paddlex/official_models/$$m"; \
 		HF_HUB_DISABLE_XET=1 uvx --from "huggingface_hub[cli]" hf download "PaddlePaddle/$$m" \

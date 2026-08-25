@@ -10,15 +10,16 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(scope="module")
 def client():
-    os.environ["YOCR_PRELOAD_OCR"] = "0"
-    os.environ["YOCR_PRELOAD_MODELS"] = ""
-    os.environ["HF_HUB_OFFLINE"] = "1"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("YOCR_PRELOAD_OCR", "0")
+        mp.setenv("YOCR_PRELOAD_MODELS", "")
+        mp.setenv("HF_HUB_OFFLINE", "1")
 
-    from yocr.app import create_app
+        from yocr.app import create_app
 
-    app = create_app()
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
+        app = create_app()
+        with TestClient(app, raise_server_exceptions=False) as c:
+            yield c
 
 
 @pytest.fixture()

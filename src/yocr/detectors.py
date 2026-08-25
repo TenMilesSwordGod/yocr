@@ -51,6 +51,7 @@ class ModelSpec:
     name: str
     source: str  # local .pt path, HF hub id or http(s) url
     prompts: tuple[str, ...] = ()  # non-empty => open-vocabulary model (YOLO-World)
+    local_names: tuple[str, ...] = ()  # extra filenames probed inside models_dir first
 
 
 def _builtin_specs(settings: Settings) -> dict[str, ModelSpec]:
@@ -58,7 +59,10 @@ def _builtin_specs(settings: Settings) -> dict[str, ModelSpec]:
     specs = {
         DEFAULT_MODEL.lower(): ModelSpec(DEFAULT_MODEL, DEFAULT_MODEL_REPO),
         "screenparser": ModelSpec("ScreenParser", "docling-project/ScreenParser"),
-        ICONFINDER_MODEL.lower(): ModelSpec(ICONFINDER_MODEL, ICONFINDER_WEIGHTS_URL, prompts=prompts),
+        ICONFINDER_MODEL.lower(): ModelSpec(
+            ICONFINDER_MODEL, ICONFINDER_WEIGHTS_URL,
+            prompts=prompts, local_names=("yolov8s-worldv2.pt",),
+        ),
     }
     for alias, source in parse_model_aliases(settings.model_aliases_raw).items():
         specs[alias] = ModelSpec(alias, source)
@@ -113,14 +117,23 @@ class YOLORegistry:
         """Resolve a spec source to something YOLO() accepts.
 
         Resolution order:
-        1. existing local file: source path or `<name>.pt` inside models_dir
-        2. HF hub id ("repo_id" or "repo_id/file.pt") -> hf_hub_download
+        1. existing local file: local_names / source path / `<name>.pt` in models_dir
+        2. HF hub id or http(s) url — only when settings.allow_download is on;
+           otherwise fail with actionable provisioning instructions
         """
-        for candidate in dict.fromkeys((spec.source, f"{spec.name}.pt")):
+        candidates = (*spec.local_names, spec.source, f"{spec.name}.pt")
+        for candidate in dict.fromkeys(candidates):
             local = resolve_model_file(self._settings.models_dir, candidate)
             if Path(local).is_file():
                 return str(local)
         source = spec.source
+        if not self._settings.allow_download:
+            raise FileNotFoundError(
+                f"model '{spec.name}' weights not provisioned locally "
+                f"(looked in '{self._settings.models_dir}': {', '.join(dict.fromkeys(candidates))}). "
+                f"run 'make models-download' on the host to fetch all weights into caches, "
+                f"or set YOCR_ALLOW_DOWNLOAD=1 to allow runtime downloads"
+            )
         if source.startswith(("http://", "https://")):
             return source  # ultralytics downloads remote weights itself
         if "/" in source:
@@ -249,7 +262,9 @@ def _normalize_names(raw: object) -> dict[int, str]:
 
 def warmup(registry: YOLORegistry, settings: Settings) -> None:
     started = time.perf_counter()
-    targets = settings.preload_models or []
+    targets = settings.preload_models
+    if targets == ("all",):
+        targets = tuple(registry.names())  # default: preload every registered model
     if targets:
         Path(settings.models_dir).mkdir(parents=True, exist_ok=True)
         registry.preload(list(targets))

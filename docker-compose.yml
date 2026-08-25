@@ -8,7 +8,8 @@ services:
     environment:
       YOCR_DEVICE: cpu                # or cuda:0 on GPU hosts
       YOCR_OCR_LANG: ch
-      YOCR_PRELOAD_MODELS: "screenparser"
+      YOCR_PRELOAD_MODELS: "all"      # preload every registered model at boot
+      YOCR_ALLOW_DOWNLOAD: "1"        # container fetches weights into the hf-cache volume
       YOCR_PRELOAD_OCR: "1"
       YOCR_LOG_LEVEL: INFO
       # extra model aliases, e.g. custom UI detector placed in ./models

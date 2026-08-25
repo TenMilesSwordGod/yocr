@@ -116,6 +116,8 @@ make systemd-restart && make health    # 应输出 "ocr_loaded": true
 - `PADDLE_PDX_CACHE_HOME`：PaddleX 查找 OCR det/rec 模型的位置
 - `HF_HOME`：ScreenParser 等走 `hf_hub_download` 的权重位置
 - `HF_HUB_OFFLINE=1`：只读缓存、不再联网尝试（避免启动卡超时）
+- 服务默认**不联网下载**：权重缺失会直接报错并提示执行 `make models-download`；
+  临时恢复运行时自动下载可设 `YOCR_ALLOW_DOWNLOAD=1`
 
 默认 UI 检测模型 `android_ui_detection_yolov8` 自动从 HuggingFace 下载
 （`yasirfaizahmed/android_ui_detection_yolov8`，Apache-2.0）；`make models-download`
@@ -144,9 +146,9 @@ uvx --from "huggingface_hub[cli]" hf download PaddlePaddle/PP-OCRv5_mobile_det
 
 | 名称 | 来源 | 说明 |
 |---|---|---|
-| `android_ui_detection_yolov8` | 本地文件优先，缺失时 HF 自动下载 | 放 `.pt` 到 `./models/android_ui_detection_yolov8.pt` 可覆盖；默认源 `yasirfaizahmed/android_ui_detection_yolov8` |
-| `ScreenParser` | HuggingFace 自动下载 | `docling-project/ScreenParser`，55 类 UI 元素 |
-| `IconFinder` | GitHub 直链自动下载 | YOLO-World 开放词汇模型，按**文字**找具体图标（设置齿轮/wifi/蓝牙/返回箭头…）；词表用 `YOCR_ICON_CLASSES` 自定义（逗号分隔） |
+| `android_ui_detection_yolov8` | `models/` 本地文件或 HF 缓存 | 放 `.pt` 到 `./models/android_ui_detection_yolov8.pt` 可覆盖；缓存源 `yasirfaizahmed/android_ui_detection_yolov8` |
+| `ScreenParser` | HF 缓存（`make models-download` 预下载） | `docling-project/ScreenParser`，55 类 UI 元素 |
+| `IconFinder` | `models/yolov8s-worldv2.pt`（`make models-download` 预下载） | YOLO-World 开放词汇模型，按**文字**找具体图标（设置齿轮/wifi/蓝牙/返回箭头…）；词表用 `YOCR_ICON_CLASSES` 自定义（逗号分隔） |
 
 自定义别名：
 
@@ -160,7 +162,8 @@ YOCR_MODEL_ALIASES="ui=android_ui_detection_yolov8.pt,mydet=org/repo/best.pt"
 
 通用 UI 检测器只会说 "App Icon"；`IconFinder`（YOLO-World 开放词汇）能直接认出
 具体是哪个图标。内置 20 个常见类别（settings 齿轮、wifi、蓝牙、返回箭头、home、
-相机、搜索、菜单、删除…），首次使用自动下载权重与 CLIP 文本编码器（需联网一次）。
+相机、搜索、菜单、删除…）。权重由 `make models-download` 下载到 `models/`，
+并顺带预热 CLIP 文本编码器缓存；未预热时首次加载需联网一次。
 
 ```bash
 # 找设置齿轮图标，直接点击坐标
@@ -258,7 +261,9 @@ curl -F "file=@screen.png" \
 | `YOCR_HOST` / `YOCR_PORT` | 0.0.0.0 / 8000 | 监听地址 |
 | `YOCR_MODELS_DIR` | `./models` | 本地 .pt 目录 |
 | `YOCR_MODEL_ALIASES` | — | 额外别名 `name=path,name2=repo/file.pt` |
-| `YOCR_PRELOAD_MODELS` | — | 启动即加载的模型，逗号分隔（如 `screenparser`） |
+| `YOCR_PRELOAD_MODELS` | `all` | 启动即加载的模型：`all` 全部内置模型、空串关闭、或逗号列表（如 `screenparser,iconfinder`） |
+| `YOCR_ALLOW_DOWNLOAD` | `0` | 是否允许服务运行时联网下载权重；默认关闭，统一用 `make models-download` 供给 |
+| `YOCR_ICON_CLASSES` | 内置20类 | IconFinder 开放词汇类别表（逗号分隔） |
 | `YOCR_PRELOAD_OCR` | `1` | 启动时初始化 PaddleOCR |
 | `YOCR_DEVICE` | `cpu` | YOLO 设备：`cpu` / `cuda:0` |
 | `YOCR_INFER_SIZE` | `1280` | YOLO 推理分辨率（越大越准越慢） |

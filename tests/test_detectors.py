@@ -144,9 +144,55 @@ def test_resolve_source_prefers_local_file(tmp_path):
 
 
 def test_resolve_source_passes_http_url_through():
-    registry = YOLORegistry(Settings())
+    registry = YOLORegistry(Settings(allow_download=True))
     resolved = registry._resolve_source(registry.spec("iconfinder"))  # noqa: SLF001
     assert resolved == ICONFINDER_WEIGHTS_URL
+
+
+def test_resolve_source_blocked_without_allow_download(tmp_path):
+    registry = YOLORegistry(Settings(models_dir=tmp_path))  # default: downloads off
+    with pytest.raises(FileNotFoundError) as excinfo:
+        registry._resolve_source(registry.spec("iconfinder"))  # noqa: SLF001
+    message = str(excinfo.value)
+    assert "make models-download" in message
+    assert "YOCR_ALLOW_DOWNLOAD=1" in message
+
+
+def test_resolve_source_iconfinder_local_file_first(tmp_path):
+    (tmp_path / "yolov8s-worldv2.pt").write_bytes(b"world-weights")
+    registry = YOLORegistry(Settings(models_dir=tmp_path, allow_download=True))
+    resolved = registry._resolve_source(registry.spec("iconfinder"))  # noqa: SLF001
+    assert resolved == str((tmp_path / "yolov8s-worldv2.pt").resolve())
+
+
+def test_warmup_all_preloads_every_registered_model(monkeypatch):
+    monkeypatch.setenv("YOCR_PRELOAD_MODELS", "all")
+    loaded: list[str] = []
+
+    def fake_load(self, spec):
+        loaded.append(spec.name)
+        return _FakeYOLO()
+
+    monkeypatch.setattr(YOLORegistry, "_load", fake_load)
+    registry = make_context(Settings()).registry  # preload_models defaults to ("all",)
+    from yocr.detectors import warmup
+
+    warmup(registry, Settings())
+    assert set(loaded) == {"android_ui_detection_yolov8", "ScreenParser", "IconFinder"}
+    for key in ("android_ui_detection_yolov8", "screenparser", "iconfinder"):
+        _, fetched = registry.get(key)  # preload 后应可即时取到已加载实例
+        assert isinstance(fetched, _FakeYOLO)
+
+
+def test_warmup_empty_env_disables_preload(monkeypatch):
+    monkeypatch.setenv("YOCR_PRELOAD_MODELS", "")
+    loaded: list[str] = []
+    monkeypatch.setattr(YOLORegistry, "_load", lambda self, spec: loaded.append(spec.name) or _FakeYOLO())
+    registry = make_context(Settings()).registry
+    from yocr.detectors import warmup
+
+    warmup(registry, Settings())
+    assert loaded == []
 
 
 def test_builtin_iconfinder_spec_uses_prompts():
@@ -181,7 +227,7 @@ def test_load_applies_prompt_names(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=fake_yolo))
     monkeypatch.setenv("YOCR_ICON_CLASSES", "gear icon, wifi icon")
-    registry = YOLORegistry(Settings())
+    registry = YOLORegistry(Settings(allow_download=True))
     _, model = registry.get("iconfinder")
     assert created["source"] == ICONFINDER_WEIGHTS_URL  # http 直链透传到 YOLO()
     assert model.names == {0: "gear icon", 1: "wifi icon"}
@@ -196,7 +242,7 @@ def test_resolve_source_downloads_from_hf_when_no_local_file(tmp_path, monkeypat
         return "/fake/cache/best.pt"
 
     monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(hf_hub_download=fake_download))
-    registry = YOLORegistry(Settings(models_dir=tmp_path))
+    registry = YOLORegistry(Settings(models_dir=tmp_path, allow_download=True))
     resolved = registry._resolve_source(registry.spec(DEFAULT_MODEL))  # noqa: SLF001
     assert resolved == "/fake/cache/best.pt"
     assert calls == {"repo_id": DEFAULT_MODEL_REPO, "filename": "best.pt"}
