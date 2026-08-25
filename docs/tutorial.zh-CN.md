@@ -16,7 +16,7 @@ uv run yocr serve --port 8000
 # 或 docker compose up -d --build
 
 # 客户端依赖
-pip install requests
+pip install httpx pydantic
 
 # 可选：把 examples/yocr_client.py 拷进你的测试工程，下文所有示例都基于它
 ```
@@ -145,9 +145,11 @@ curl -F "file=@screen.png" \
 ```
 
 ```python
-r = requests.post(f"{YOCR}/analyze",
-                  params={"model": "screenparser", "text": "Allow"},
-                  files={"file": ("s.png", png, "image/png")}).json()
+import httpx
+
+r = httpx.post(f"{YOCR}/analyze",
+               params={"model": "screenparser", "text": "Allow"},
+               files={"file": ("s.png", png, "image/png")}).json()
 if r["found"]:
     x, y = r["matched"]["box"]["center"]
 ```
@@ -349,9 +351,9 @@ README「[离线部署：用 uvx hf 预下载模型](../README.md#离线部署�
 首次调用要加载权重 + 首帧推理建图，之后就是热路径（CPU 实测：检测 ~2.7s→2.4s，OCR ~0.75s）。
 生产上务必配置启动预热：`YOCR_PRELOAD_MODELS=screenparser` + `YOCR_PRELOAD_OCR=1`。
 
-**Q: requests 报 502 Bad Gateway？**
-系统代理劫持了 localhost。客户端里已内置 `session.trust_env = False`；
-用 curl 的话加 `--noproxy '*'`。
+**Q: 请求报 502 Bad Gateway？**
+系统代理劫持了 localhost。客户端里已内置 `httpx.Client(trust_env=False)`；
+用 curl 的话加 `--noproxy '*'`，用 requests/httpx 裸调时记得同样关闭代理。
 
 **Q: 怎么看我的模型有哪些类别？**
 服务启动后 `GET /api/v1/models`，`classes` 字段就是 id->类别名 映射；
