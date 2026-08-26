@@ -83,7 +83,21 @@ clean: ## 清理测试缓存
 frontend-install: ## 安装前端依赖 (frontend/)
 	npm --prefix frontend install --no-audit --no-fund
 
-frontend-build: ## 构建前端到 frontend/dist（服务自动托管在 /）
+frontend-build: ## 构建前端到 frontend/dist（服务自动托管在 /；无 npm 时沿用已有 dist）
+	@if [ ! -f frontend/package.json ]; then \
+		echo "!! frontend/ 不存在，跳过前端构建（仅后端 API）"; exit 0; \
+	fi; \
+	if ! command -v npm >/dev/null 2>&1; then \
+		if [ -f frontend/dist/index.html ]; then \
+			echo "!! 未找到 npm，沿用已有 frontend/dist"; \
+		else \
+			echo "!! 未找到 npm 且 frontend/dist 不存在：部署将只含后端 API（无前端界面）"; \
+		fi; \
+		exit 0; \
+	fi; \
+	if [ ! -x frontend/node_modules/.bin/vite ]; then \
+		npm --prefix frontend install --no-audit --no-fund || exit 1; \
+	fi; \
 	npm --prefix frontend run build
 
 frontend-dev: ## 前端开发模式 (Vite 热更新, 代理 /api 到 127.0.0.1:8000)
@@ -106,8 +120,8 @@ docker-logs: ## 跟踪容器日志
 	$(COMPOSE) logs -f
 
 # ------------------------------- systemd --------------------------------
-# 一条命令完成: 依赖安装 + uvx hf 下载模型(.cache/) + 渲染安装 unit(需 sudo)。
-systemd-install: install models-download ## 安装依赖+下载模型+装 systemd 服务(需 sudo)
+# 一条命令完成: 依赖安装 + 前端构建 + uvx hf 下载模型(.cache/) + 渲染安装 unit(需 sudo)。
+systemd-install: install models-download frontend-build ## 安装依赖+构建前端+下载模型+装 systemd 服务(需 sudo)
 	@sed -e "s|__APP_DIR__|$(CURDIR)|g" \
 	     -e "s|__RUN_USER__|$(RUN_USER)|g" \
 	     -e "s|__RUN_GROUP__|$(RUN_GROUP)|g" \
@@ -119,7 +133,8 @@ systemd-install: install models-download ## 安装依赖+下载模型+装 system
 	     -e "s|__PADDLE_CACHE__|$(CACHE_DIR)/paddlex|g" \
 	     -e "s|__HF_OFFLINE__|$(HF_OFFLINE)|g" \
 	     -e "s|__PRELOAD_MODELS__|$(PRELOAD_MODELS)|g" \
-	     -e "s|__HF_ENDPOINT__|$(HF_ENDPOINT)|g" deploy/yocr.service | sudo tee $(SYSTEMD_UNIT) > /dev/null
+	     -e "s|__HF_ENDPOINT__|$(HF_ENDPOINT)|g" \
+	     -e "s|__SUCAI_DIR__|$(CURDIR)/data/sucai|g" deploy/yocr.service | sudo tee $(SYSTEMD_UNIT) > /dev/null
 	sudo systemctl daemon-reload
 	@echo "已安装 $(SYSTEMD_UNIT)  ->  make systemd-start 启动"
 	@echo "模型缓存: $(CACHE_DIR)  |  换机器/换目录时用 CACHE_DIR=... 指定"

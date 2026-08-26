@@ -48,13 +48,17 @@ curl http://127.0.0.1:8000/api/v1/healthz
 **一条命令完成依赖安装 + 模型下载（uvx hf）+ 服务安装**：
 
 ```bash
-make systemd-install    # 依赖 + uvx hf 下载模型到 .cache/ + 渲染安装 unit(需输 sudo 密码)
+make systemd-install    # 依赖 + 前端构建 + uvx hf 下载模型到 .cache/ + 渲染安装 unit(需输 sudo 密码)
 make systemd-start      # 启动并设置开机自启
 make health             # 探活 http://127.0.0.1:8000/api/v1/healthz -> "ocr_loaded": true
 make systemd-logs       # journalctl -u yocr -f
 make systemd-stop       # 停止并取消自启
 make systemd-uninstall  # 卸载 unit
 ```
+
+启动后打开 `http://<host>:8000/` 即是 Vue 素材管理界面（`make systemd-install`
+会自动构建前端；服务器没有 npm 时沿用已有 `frontend/dist`，没有构建产物则仅提供 API）。
+素材库数据落在 `<repo>/data/sucai`（unit 内 `YOCR_SUCAI_DIR`），随服务持久化。
 
 常用变量（均可覆盖）：
 
