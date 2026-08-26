@@ -16,22 +16,30 @@ export function sucaiImageUrl(id) {
   return `${BASE}/sucai/${encodeURIComponent(id)}/image`
 }
 
-export async function listSucai() {
-  return handle(await fetch(`${BASE}/sucai`))
+export async function listSucai({ category = '', page = 1, pageSize = 24 } = {}) {
+  const q = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (category) q.set('category', category)
+  return handle(await fetch(`${BASE}/sucai?${q}`))
 }
 
-export async function createSucai({ file, id, describe }) {
+export async function listSucaiCategories() {
+  return handle(await fetch(`${BASE}/sucai/categories`))
+}
+
+export async function createSucai({ file, id, describe, category }) {
   const form = new FormData()
   form.append('file', file)
   if (id) form.append('id', id)
   if (describe) form.append('describe', describe)
+  if (category) form.append('category', category)
   return handle(await fetch(`${BASE}/sucai`, { method: 'POST', body: form }))
 }
 
-export async function updateSucai(id, { file, describe } = {}) {
+export async function updateSucai(id, { file, describe, category } = {}) {
   const form = new FormData()
   if (file) form.append('file', file)
   if (describe !== undefined && describe !== null) form.append('describe', describe)
+  if (category !== undefined && category !== null) form.append('category', category)
   return handle(await fetch(`${BASE}/sucai/${encodeURIComponent(id)}`, { method: 'PUT', body: form }))
 }
 

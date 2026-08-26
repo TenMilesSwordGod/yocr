@@ -211,3 +211,34 @@ def test_list_ordering_newest_first_with_stable_tiebreak(tmp_path):
 def test_max_side_constant_matches_guard():
     assert ID_PATTERN.match("a" * 64)
     assert not ID_PATTERN.match("a" * 65)
+
+
+# ------------------------------------------------------------ category ---
+def test_create_stores_stripped_category(store):
+    record = store.create(_png(), category="  按钮  ")
+    assert record["category"] == "按钮"
+
+
+def test_create_rejects_over_long_category(store):
+    with pytest.raises(SucaiError):
+        store.create(_png(), category="x" * 33)
+
+
+def test_update_category_semantics(store):
+    store.create(_png(), sid="c1", category="按钮")
+    # None = leave unchanged (needs another field to make the call a real op)
+    assert store.update("c1", describe="x", category=None)["category"] == "按钮"
+    assert store.update("c1", category="图标")["category"] == "图标"
+    assert store.update("c1", category="")["category"] == ""  # cleared
+
+
+def test_categories_distinct_sorted_and_filter(store):
+    store.create(_png(seed=1), sid="a", category="图标")
+    store.create(_png(seed=2), sid="b", category="按钮")
+    store.create(_png(seed=3), sid="c", category="图标")
+    store.create(_png(seed=4), sid="d")
+    assert store.categories() == sorted({"图标", "按钮"})
+    # same-second creates tie-break by id descending (newest first)
+    assert sorted(i["id"] for i in store.list(category="图标")) == ["a", "c"]
+    assert [i["id"] for i in store.list(category="")] == ["d"]
+    assert len(store.list()) == 4  # no filter

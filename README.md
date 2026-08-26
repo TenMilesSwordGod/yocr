@@ -196,9 +196,10 @@ YOCR_ICON_CLASSES="a gear settings icon, a wifi icon, a download icon" \
 | POST | `/ocr` | PaddleOCR 文字识别 |
 | POST | `/analyze` | 检测 + OCR + 文本归属合并（推荐，同支持 `found`/`matched`） |
 | POST | `/match` | 模板匹配：在场景图(file)中定位模板图(template)，返回 found/score/box/scale |
-| GET/POST | `/sucai` | 素材库列表 / 注册素材（`file` + 可选 `id`、`describe`） |
-| GET/PUT/DELETE | `/sucai/{id}` | 素材详情 / 更新描述与图片 / 删除 |
+| GET/POST | `/sucai` | 素材列表（`category` 过滤 + `page`/`page_size` 分页）/ 注册素材（`file` + 可选 `id`、`describe`、`category`） |
+| GET/PUT/DELETE | `/sucai/{id}` | 素材详情 / 更新描述、分类与图片 / 删除 |
 | GET | `/sucai/{id}/image` | 素材图片 (PNG) |
+| GET | `/sucai/categories` | 已使用的分类标签（去重排序，供筛选下拉框） |
 | POST | `/sucai/find` | 场景图与全部素材比对，按 score 降序返回命中项及定位框 |
 
 ### POST /detect
@@ -290,7 +291,8 @@ make frontend-install && make frontend-build   # 构建到 frontend/dist
 make run                                        # 打开 http://127.0.0.1:8000/
 ```
 
-- **素材库**：拖拽/选择图片 + id + 描述 → 注册；卡片列表支持预览与删除
+- **素材库**：拖拽/选择图片 + id + 分类 + 描述 → 注册；按分类快速筛选，
+  分页浏览（每页 12/24/48 可调），卡片列表支持预览与删除
 - **查找定位**：上传或 **Ctrl+V 直接粘贴截图** → 与全部素材比对，画布上框出命中位置，
   结果列表按得分排序（未过阈值的也会显示最高得分，便于调阈值）；
   勾选"标记所有出现位置"可同时框出同一素材的每一次出现

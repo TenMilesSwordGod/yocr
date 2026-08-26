@@ -138,10 +138,28 @@ async def _json_body(request: Request) -> dict:
 
 # --------------------------------------------------------------- sucai ----
 @router.get("/sucai", response_model=SucaiListResponse, tags=["sucai"])
-def list_sucai(request: Request):
+def list_sucai(
+    request: Request,
+    category: str = Query(default="", description="按分类精确过滤；留空 = 全部"),
+    page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(default=24, ge=1, le=200, description="每页数量"),
+):
     store = get_sucai_store(request)
-    items = [SucaiInfo.from_record(r) for r in store.list()]
-    return SucaiListResponse(total=len(items), items=items)
+    items = store.list(category=category or None)
+    total = len(items)
+    start = (page - 1) * page_size
+    return SucaiListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=[SucaiInfo.from_record(r) for r in items[start : start + page_size]],
+    )
+
+
+@router.get("/sucai/categories", tags=["sucai"])
+def list_sucai_categories(request: Request):
+    """全部已使用的分类标签（去重、排序），供前端筛选下拉框使用。"""
+    return {"categories": get_sucai_store(request).categories()}
 
 
 @router.post("/sucai", response_model=SucaiInfo, status_code=201, tags=["sucai"])
@@ -150,11 +168,13 @@ async def create_sucai(
     file: bytes = File(description="素材图片"),
     describe: str = Form(default=""),
     id: str | None = Form(default=None),
+    category: str = Form(default=""),
 ):
-    """注册素材：id 可省略（自动生成），describe 为可选描述。"""
+    """注册素材：id/category 可省略（category 空 = 未分类）。"""
     store = get_sucai_store(request)
     try:
-        record = store.create(file, describe=describe, sid=(id or "").strip() or None)
+        record = store.create(file, describe=describe, sid=(id or "").strip() or None,
+                              category=category)
     except SucaiConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SucaiError as exc:
@@ -179,16 +199,19 @@ async def update_sucai(
     request: Request,
     file: bytes | None = File(default=None),
     describe: str | None = Form(default=None),
+    category: str | None = Form(default=None),
 ):
-    """更新素材描述和/或替换图片；describe 传空字符串表示清空描述。"""
+    """更新素材描述/分类和/或替换图片；传空字符串表示清空对应字段。"""
     store = get_sucai_store(request)
-    # FastAPI collapses empty form values to None — recover an explicit
-    # `describe=""` (clear the description) from the raw form.
+    # FastAPI collapses empty form values to None — recover explicit
+    # `describe=""` / `category=""` (clear the field) from the raw form.
     form = await request.form()
     if "describe" in form:
         describe = str(form["describe"])
+    if "category" in form:
+        category = str(form["category"])
     try:
-        record = store.update(sid, describe=describe, image_bytes=file)
+        record = store.update(sid, describe=describe, image_bytes=file, category=category)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SucaiError as exc:

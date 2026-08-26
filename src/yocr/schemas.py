@@ -116,6 +116,7 @@ class SucaiInfo(BaseModel):
 
     id: str = Field(description="素材唯一标识")
     describe: str = Field(default="", description="素材描述")
+    category: str = Field(default="", description="分类标签；空 = 未分类")
     width: int
     height: int
     size_bytes: int = Field(description="PNG 字节数")
@@ -130,7 +131,9 @@ class SucaiInfo(BaseModel):
 
 
 class SucaiListResponse(BaseModel):
-    total: int
+    total: int = Field(description="过滤后的素材总数（分页前）")
+    page: int = Field(default=1, description="当前页码，从 1 开始")
+    page_size: int = Field(default=24, description="每页数量")
     items: list[SucaiInfo]
 
 
@@ -148,6 +151,7 @@ class SucaiFindMatch(BaseModel):
 
     id: str
     describe: str = ""
+    category: str = Field(default="", description="分类标签")
     found: bool = Field(description="是否有达到阈值的实例")
     score: float = Field(description="最佳实例（或最近似）的归一化相关度 0~1")
     scale: float = Field(default=1.0, description="最佳实例的模板缩放系数")

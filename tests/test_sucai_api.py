@@ -541,3 +541,78 @@ def test_find_color_gate_blocks_cross_color_matches(client):
     # the wrong-color location must not score above the threshold
     assert by_id["red-btn"]["hits"][0]["score"] >= 0.8
     assert by_id["blue-btn"]["hits"][0]["score"] >= 0.8
+
+
+# ----------------------------------------------------- category + pages ---
+def test_sucai_category_crud_filter_and_categories(client):
+    png = _pattern_png(10, 10, seed=81)
+    for sid, cat in [("cat-a", "按钮"), ("cat-b", "按钮"), ("cat-c", "图标")]:
+        r = client.post("/api/v1/sucai",
+                        files={"file": ("x.png", png, "image/png")},
+                        data={"id": sid, "category": cat})
+        assert r.status_code == 201, r.text
+        assert r.json()["category"] == cat
+    # no category -> uncategorized
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("x.png", png, "image/png")}, data={"id": "cat-none"})
+    assert r.status_code == 201 and r.json()["category"] == ""
+
+    # exact filter
+    items = client.get("/api/v1/sucai", params={"category": "按钮"}).json()["items"]
+    assert {i["id"] for i in items} == {"cat-a", "cat-b"}
+
+    # distinct sorted category list
+    cats = client.get("/api/v1/sucai/categories").json()["categories"]
+    assert {"按钮", "图标"} <= set(cats) and cats == sorted(cats)
+
+    # update: move + clear (empty string clears, thanks to raw-form recovery)
+    r = client.put("/api/v1/sucai/cat-a", data={"category": "图标"})
+    assert r.status_code == 200 and r.json()["category"] == "图标"
+    assert {i["id"] for i in client.get("/api/v1/sucai", params={"category": "按钮"}).json()["items"]} == {"cat-b"}
+    r = client.put("/api/v1/sucai/cat-a", data={"category": ""})
+    assert r.status_code == 200 and r.json()["category"] == ""
+
+    # over-long category -> 400
+    r = client.put("/api/v1/sucai/cat-a", data={"category": "x" * 33})
+    assert r.status_code == 400
+
+    # find results carry the category
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", _pattern_png(30, 30, seed=82), "image/png")}).json()
+    sample = next(m for m in r["results"] if m["id"] == "cat-b")
+    assert sample["category"] == "按钮"
+
+    # cleanup to keep later pagination counts predictable
+    for sid in ("cat-a", "cat-b", "cat-c", "cat-none"):
+        client.delete(f"/api/v1/sucai/{sid}")
+
+
+def test_sucai_pagination(client):
+    png = _pattern_png(8, 8, seed=83)
+    for i in range(1, 6):  # 5 items in a dedicated category
+        r = client.post("/api/v1/sucai",
+                        files={"file": ("x.png", png, "image/png")},
+                        data={"id": f"page-t-{i}", "category": "page-test"})
+        assert r.status_code == 201
+
+    base = {"category": "page-test"}
+    p1 = client.get("/api/v1/sucai", params={**base, "page": 1, "page_size": 2}).json()
+    assert p1["total"] == 5 and p1["page"] == 1 and len(p1["items"]) == 2
+    p3 = client.get("/api/v1/sucai", params={**base, "page": 3, "page_size": 2}).json()
+    assert len(p3["items"]) == 1
+    p4 = client.get("/api/v1/sucai", params={**base, "page": 4, "page_size": 2}).json()
+    assert p4["items"] == [] and p4["total"] == 5
+
+    # all pages together cover every id exactly once
+    seen = []
+    for p in (1, 2, 3):
+        seen += [i["id"] for i in client.get(
+            "/api/v1/sucai", params={**base, "page": p, "page_size": 2}).json()["items"]]
+    assert sorted(seen) == [f"page-t-{i}" for i in range(1, 6)]
+
+    # invalid paging params -> 422
+    assert client.get("/api/v1/sucai", params={"page": 0}).status_code == 422
+    assert client.get("/api/v1/sucai", params={"page_size": 500}).status_code == 422
+
+    for i in range(1, 6):
+        client.delete(f"/api/v1/sucai/page-t-{i}")

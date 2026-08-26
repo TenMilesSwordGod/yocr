@@ -342,6 +342,7 @@ def find_sucai(
         matches.append(SucaiFindMatch(
             id=record["id"],
             describe=record.get("describe", ""),
+            category=record.get("category", ""),
             found=found,
             score=round(score, 4),
             scale=best.scale if best else 1.0,

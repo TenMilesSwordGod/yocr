@@ -28,6 +28,7 @@ logger = logging.getLogger("yocr.sucai")
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MAX_SIDE = 2048
+MAX_CATEGORY_LEN = 32
 
 
 class SucaiError(ValueError):
@@ -91,13 +92,23 @@ class SucaiStore:
             raise SucaiError("id must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}")
         return sid
 
-    def create(self, image_bytes: bytes, *, describe: str = "", sid: str | None = None) -> dict:
+    @staticmethod
+    def _norm_category(category: str | None) -> str:
+        """Normalize a category label: trimmed, bounded length."""
+        value = (category or "").strip()
+        if len(value) > MAX_CATEGORY_LEN:
+            raise SucaiError(f"category too long (max {MAX_CATEGORY_LEN} chars)")
+        return value
+
+    def create(self, image_bytes: bytes, *, describe: str = "", sid: str | None = None,
+               category: str = "") -> dict:
         """Register a new sucai; returns its metadata record."""
         image = decode_image(image_bytes)  # raises ValueError on corrupt input
         height, width = image.shape[:2]
         if max(width, height) > MAX_SIDE:
             raise SucaiError(f"picture too large ({width}x{height}); max side is {MAX_SIDE}px")
         png = encode_png(image)
+        category = self._norm_category(category)
 
         with self._lock:
             if sid:
@@ -114,6 +125,7 @@ class SucaiStore:
             record = {
                 "id": sid,
                 "describe": (describe or "").strip(),
+                "category": category,
                 "width": int(width),
                 "height": int(height),
                 "size_bytes": len(png),
@@ -121,15 +133,29 @@ class SucaiStore:
             }
             self._meta[sid] = record
             self._save_locked()
-        logger.info("sucai registered: %s (%dx%d) %s", sid, width, height, describe[:40])
+        logger.info("sucai registered: %s (%dx%d) [%s] %s", sid, width, height, category, describe[:40])
         return dict(record)
 
-    def list(self) -> list[dict]:
+    def list(self, category: str | None = None) -> list[dict]:
+        """List sucai, optionally filtered by exact category.
+
+        Args:
+            category: None disables filtering; a string (including "")
+                keeps only sucai whose category equals it ("" = uncategorized).
+        """
         with self._lock:
             items = [dict(v) for v in self._meta.values()]
+        if category is not None:
+            items = [i for i in items if i.get("category", "") == category]
         # Newest first; id tiebreak keeps order stable within the same second.
         items.sort(key=lambda r: (r.get("created_at") or "", r.get("id") or ""), reverse=True)
         return items
+
+    def categories(self) -> list[str]:
+        """Distinct non-empty category labels, sorted."""
+        with self._lock:
+            cats = {v.get("category", "").strip() for v in self._meta.values()}
+        return sorted(c for c in cats if c)
 
     def get(self, sid: str) -> dict:
         with self._lock:
@@ -139,10 +165,15 @@ class SucaiStore:
         return dict(record)
 
     def update(self, sid: str, *, describe: str | None = None,
-               image_bytes: bytes | None = None) -> dict:
-        """Update describe and/or replace the picture."""
-        if image_bytes is None and describe is None:
-            raise SucaiError("nothing to update (provide describe and/or file)")
+               image_bytes: bytes | None = None,
+               category: str | None = None) -> dict:
+        """Update describe/category and/or replace the picture.
+
+        None leaves a field unchanged; an empty string clears it.
+        """
+        if image_bytes is None and describe is None and category is None:
+            raise SucaiError("nothing to update (provide describe/category and/or file)")
+        category = self._norm_category(category) if category is not None else None
         with self._lock:
             if sid not in self._meta:
                 raise KeyError(f"sucai '{sid}' not found")
@@ -161,6 +192,9 @@ class SucaiStore:
                               size_bytes=len(png), updated_at=_now_iso())
             if describe is not None:
                 record["describe"] = describe.strip()
+            if category is not None:
+                record["category"] = category
+            if describe is not None or category is not None:
                 record.setdefault("updated_at", _now_iso())
             self._save_locked()
             return dict(record)
