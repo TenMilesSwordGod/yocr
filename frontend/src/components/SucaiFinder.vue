@@ -126,7 +126,10 @@ async function draw() {
           </svg>
           拖拽 / 点击上传<br />或直接 <b>Ctrl+V</b> 粘贴截图
         </div>
-        <div v-else class="picked">已选择图片，可重新上传替换</div>
+        <div v-else class="picked">
+          <img :src="sceneUrl" alt="期望图片预览" />
+          <span>点击或拖拽可替换</span>
+        </div>
         <input type="file" accept="image/*" aria-label="选择期望图片" @change="pickFile" />
       </div>
 
@@ -257,7 +260,24 @@ async function draw() {
   pointer-events: none;
 }
 .dropzone .hint b { color: var(--text); }
-.dropzone .picked { color: var(--text-dim); font-size: 13px; padding: 12px; text-align: center; }
+.dropzone .picked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 10px;
+  text-align: center;
+  pointer-events: none;
+}
+.dropzone .picked img {
+  max-width: 100%;
+  max-height: 150px;
+  object-fit: contain;
+  border-radius: 6px;
+  display: block;
+}
 .dropzone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
 .check {
@@ -287,7 +307,14 @@ async function draw() {
   justify-content: center;
   overflow: hidden;
 }
-.canvas { width: 100%; height: auto; display: block; border-radius: 6px; }
+.canvas {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(72vh, 900px);
+  display: block;
+  border-radius: 6px;
+}
 .placeholder {
   display: flex;
   flex-direction: column;
