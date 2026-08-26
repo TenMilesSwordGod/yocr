@@ -2,6 +2,8 @@
 import { onMounted, ref } from 'vue'
 import SucaiLibrary from './components/SucaiLibrary.vue'
 import SucaiFinder from './components/SucaiFinder.vue'
+import VisionLab from './components/VisionLab.vue'
+import TemplateMatch from './components/TemplateMatch.vue'
 
 const tab = ref('library')
 const health = ref('checking') // checking | ok | down
@@ -49,6 +51,20 @@ onMounted(checkHealth)
           class="tab ghost"
           @click="tab = 'finder'"
         >查找定位</button>
+        <button
+          role="tab"
+          :aria-selected="tab === 'vision'"
+          :class="{ active: tab === 'vision' }"
+          class="tab ghost"
+          @click="tab = 'vision'"
+        >视觉分析</button>
+        <button
+          role="tab"
+          :aria-selected="tab === 'match'"
+          :class="{ active: tab === 'match' }"
+          class="tab ghost"
+          @click="tab = 'match'"
+        >模板匹配</button>
       </nav>
 
       <div class="health" :class="health" :title="`服务状态：${health}`">
@@ -63,6 +79,12 @@ onMounted(checkHealth)
       </div>
       <div v-show="tab === 'finder'" role="tabpanel" aria-label="查找定位">
         <SucaiFinder />
+      </div>
+      <div v-show="tab === 'vision'" role="tabpanel" aria-label="视觉分析">
+        <VisionLab />
+      </div>
+      <div v-show="tab === 'match'" role="tabpanel" aria-label="模板匹配">
+        <TemplateMatch />
       </div>
     </main>
   </div>
@@ -143,6 +165,7 @@ onMounted(checkHealth)
   .topbar { flex-wrap: wrap; gap: 10px; }
   .sub { display: none; }
   .health { margin-left: auto; }
+  .tab { padding: 0 12px; font-size: 12px; min-height: 28px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .topbar { backdrop-filter: none; background: var(--bg); }

@@ -55,3 +55,48 @@ export async function findSucai({ sceneFile, threshold, topK = 0, allInstances =
     { method: 'POST', body: form },
   ))
 }
+
+// ------------------------------------------------ vision analysis --------
+export async function listModels() {
+  return handle(await fetch(`${BASE}/models`))
+}
+
+function visionQuery({ model, conf, iou, imgsz, text, label, q, matchMode } = {}) {
+  const qs = new URLSearchParams()
+  if (model) qs.set('model', model)
+  if (conf != null) qs.set('conf', conf)
+  if (iou != null) qs.set('iou', iou)
+  if (imgsz) qs.set('imgsz', imgsz)
+  if (text) qs.set('text', text)
+  if (label) qs.set('label', label)
+  if (q) qs.set('q', q)
+  if (matchMode && matchMode !== 'contains') qs.set('match_mode', matchMode)
+  return qs
+}
+
+export async function detect({ file, ...params }) {
+  const form = new FormData()
+  form.append('file', file)
+  return handle(await fetch(`${BASE}/detect?${visionQuery(params)}`, { method: 'POST', body: form }))
+}
+
+export async function ocr({ file }) {
+  const form = new FormData()
+  form.append('file', file)
+  return handle(await fetch(`${BASE}/ocr`, { method: 'POST', body: form }))
+}
+
+export async function analyze({ file, withOcr = true, ...params }) {
+  const qs = visionQuery(params)
+  qs.set('with_ocr', String(withOcr))
+  const form = new FormData()
+  form.append('file', file)
+  return handle(await fetch(`${BASE}/analyze?${qs}`, { method: 'POST', body: form }))
+}
+
+export async function matchTemplate({ sceneFile, templateFile, threshold }) {
+  const form = new FormData()
+  form.append('file', sceneFile)
+  form.append('template', templateFile)
+  return handle(await fetch(`${BASE}/match?threshold=${threshold}`, { method: 'POST', body: form }))
+}
