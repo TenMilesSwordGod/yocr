@@ -312,6 +312,43 @@ def test_find_scaled_template_multiscale(client):
     assert mine["box"]["xyxy"] == [50, 40, 80, 64]
 
 
+def test_find_4k_scene_lowres_template(client):
+    """Regression: a crop from a low-res screen vs a 4K scene needs ~2x scale.
+
+    The old 0.5..1.5 scale list phantom-matched at ~0.83 with a misplaced
+    box; the pyramid coarse pass must find the true 2x location instead.
+    """
+    rng0 = np.random.default_rng(77)
+    tpl = cv2.GaussianBlur(
+        rng0.integers(0, 255, (50, 63, 3), dtype=np.uint8), (0, 0), 2.5
+    )
+    ok, buf = cv2.imencode(".png", tpl)
+    assert ok
+    tpl_bytes = buf.tobytes()
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("t.png", tpl_bytes, "image/png")},
+                    data={"id": "fourk"})
+    assert r.status_code == 201, r.text
+
+    rng = np.random.default_rng(9)
+    scene = rng.integers(0, 255, (2088, 3840, 3), dtype=np.uint8)
+    big = cv2.resize(tpl, (126, 100), interpolation=cv2.INTER_CUBIC)
+    scene[1345:1445, 3695:3821] = big
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")},
+                    params={"threshold": 0.8, "all_instances": "true"})
+    assert r.status_code == 200
+    mine = next(m for m in r.json()["results"] if m["id"] == "fourk")
+    assert mine["found"] is True, mine
+    assert abs(mine["scale"] - 2.0) < 0.03
+    x1, y1, x2, y2 = mine["box"]["xyxy"]
+    assert abs(x1 - 3695) <= 1 and abs(y1 - 1345) <= 1
+    assert abs(x2 - 3821) <= 1 and abs(y2 - 1445) <= 1
+    assert mine["score"] >= 0.9
+
+
 def test_find_template_larger_than_scene_never_found(client):
     client.post("/api/v1/sucai",
                 files={"file": ("t.png", _pattern_png(300, 400, seed=32), "image/png")},

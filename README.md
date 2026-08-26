@@ -282,6 +282,15 @@ curl -F "file=@screen.png" "http://127.0.0.1:8000/api/v1/sucai/find?threshold=0.
 （同形状不同颜色的控件不再互相误报），`all_instances=true` 时用跨尺度 NMS
 返回同一素材的**全部出现位置**（`hits` 数组，默认只返回最佳位置）。
 
+超大场景（长边 > 2000px，如 4K 截图）走**金字塔粗扫**：先在半分辨率上以
+`scale/2` 快速定位尺度带（等效覆盖 0.5~3.0 倍 DPI 差，1080p 素材 ↔ 4K 截图），
+再只在全分辨率上精扫窄带，速度反而更快。
+
+可选 **XFeat 特征验证**（`YOCR_MATCH_VERIFY=1`，默认开）：每个 NCC 命中用
+XFeat（CVPR 2024，Apache-2.0）特征 + RANSAC 仿射验证几何一致性并精修定位框，
+假阳性（如错尺度、错位置的 ~0.83 命中）会被直接砍到阈值以下；权重由
+`make models-download` 下载到 `.cache/xfeat/xfeat.pt`，缺失时自动降级为纯 NCC。
+
 素材持久化在 `YOCR_SUCAI_DIR`（默认 `./data/sucai`，meta.json + PNG），重启不丢、可整目录拷贝。
 
 ### 前端管理界面（Vue 3）

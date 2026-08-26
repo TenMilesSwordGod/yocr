@@ -75,6 +75,10 @@ models-download: ## 用 uvx hf 下载模型到 .cache/（SKIP_MODELS=1 跳过；
 		HF_HUB_DISABLE_XET=1 uvx --from "huggingface_hub[cli]" hf download "PaddlePaddle/$$m" \
 			--local-dir "$(CACHE_DIR)/paddlex/official_models/$$m"; \
 	done
+	@echo "== XFeat (模板比对特征验证, Apache-2.0) -> $(CACHE_DIR)/xfeat/xfeat.pt"
+	@mkdir -p "$(CACHE_DIR)/xfeat"
+	curl -fL --retry 3 -o "$(CACHE_DIR)/xfeat/xfeat.pt" \
+		"https://raw.githubusercontent.com/verlab/accelerated_features/main/weights/xfeat.pt"
 
 clean: ## 清理测试缓存
 	rm -rf .pytest_cache tests/__pycache__ src/yocr/__pycache__

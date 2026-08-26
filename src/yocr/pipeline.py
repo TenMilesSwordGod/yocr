@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from fastapi import HTTPException
@@ -30,8 +31,27 @@ from .schemas import (
 )
 from .sucai import SucaiStore
 from .template import locate_instances, locate_template
+from .verify import EXACT_NCC_SCORE, FeatureVerifier, VerifyResult, fuse_score
 
 logger = logging.getLogger("yocr.pipeline")
+
+# Cap the number of per-sucai instances that get geometric verification;
+# the pyramid NMS already collapses the common case to one (or a few).
+MAX_VERIFY_INSTANCES = 8
+
+
+def _pick_box_and_scale(inst, result):
+    """Choose the box/scale pair to report for one verified instance.
+
+    Verified geometry wins except for pixel-exact NCC matches (score >= 0.98):
+    there the NCC box is already accurate to the pixel, and learned-feature
+    refinement would only add keypoint-level noise. The reported scale always
+    comes from the NCC refine walk, which is more precise than the XFeat
+    transform estimate.
+    """
+    if result.ok and inst.confidence < EXACT_NCC_SCORE and result.box:
+        return result.box, inst.scale
+    return inst.xyxy, inst.scale
 
 
 def _resolve_target(elements: list[Element], *, text: str | None, label: str | None,
@@ -281,6 +301,8 @@ def find_sucai(
     threshold: float = 0.8,
     top_k: int = 0,
     all_instances: bool = False,
+    match_verify: bool = True,
+    xfeat_weights: Path | None = None,
 ) -> SucaiFindResponse:
     """Compare a scene screenshot against every registered sucai template.
 
@@ -296,6 +318,9 @@ def find_sucai(
         top_k: Keep only the best N results (0 = keep all).
         all_instances: Report every occurrence of each sucai (NMS-deduped)
             instead of only its single best location.
+        match_verify: Geometrically verify and refine NCC hits with XFeat
+            features (rejects phantom matches, refines boxes).
+        xfeat_weights: Path to XFeat weights; None uses the configured default.
 
     Returns:
         SucaiFindResponse: Per-sucai matches sorted by score descending.
@@ -306,6 +331,9 @@ def find_sucai(
     started = time.perf_counter()
     scene = load_image(scene_bytes, scene_b64)
     height, width = scene.shape[:2]
+
+    verifier = FeatureVerifier(xfeat_weights) if match_verify else None
+    verify_ready = verifier is not None and verifier.available
 
     records = store.iter_records()
     matches: list[SucaiFindMatch] = []
@@ -330,33 +358,71 @@ def find_sucai(
             # skip the item instead of failing the whole search.
             logger.warning("sucai '%s' unusable, skipped: %s", record["id"], exc)
             continue
+
+        # Geometrically verify each candidate (cap to keep worst case bounded):
+        # every hit gets a refined box when consistent inliers are found, and
+        # its score is folded with the evidence so phantoms drop below gate.
+        instances_for_verify = instances[:MAX_VERIFY_INSTANCES]
+        verified: list[tuple[object, VerifyResult]] = []
+        template_feats = None
+        if verify_ready and instances_for_verify:
+            template_feats = verifier.template_features(template)
+        for inst in instances_for_verify:
+            result = verifier.verify_hit(
+                scene, template, template_feats, inst.xyxy, scale=inst.scale
+            )
+            verified.append((inst, result))
+        verified.sort(
+            key=lambda pair: fuse_score(pair[0].confidence, pair[1]), reverse=True
+        )
+
         elapsed_ms = (time.perf_counter() - item_started) * 1000
-        score = max(0.0, float(raw_best.confidence)) if raw_best else 0.0
-        # No instance => nothing reached threshold (or the template could not
-        # be compared at all): never report it as found.
-        found = bool(instances)
-        # Best instance when found; otherwise keep the raw best so callers
-        # still see where the closest near-miss was.
-        best = instances[0] if instances else raw_best
-        box = Box.from_xyxy(*best.xyxy) if best else None
+        fused_list = []
+        for inst, result in verified:
+            # A pixel-exact NCC match is already conclusive; geometric
+            # evidence cannot raise it, only add keypoint-level noise, so its
+            # reported score stays the plain NCC value.
+            if inst.confidence >= EXACT_NCC_SCORE:
+                fused_list.append((inst, result, inst.confidence))
+            else:
+                fused_list.append((inst, result, fuse_score(inst.confidence, result)))
+        found_instances = [t for t in fused_list if t[2] >= threshold]
+        score = max((t[2] for t in fused_list), default=0.0)
+        if score == 0.0 and raw_best is not None:
+            # Nothing verifiable above zero (e.g. verification stripped every
+            # candidate); fall back to the raw NCC best for near-miss display.
+            score = float(raw_best.confidence)
+        best = found_instances[0] if found_instances else (
+            fused_list[0] if fused_list else None
+        )
+        found = bool(found_instances)
+        if best is not None:
+            inst, result, fused = best
+            xyxy, scale = _pick_box_and_scale(inst, result)
+            box = Box.from_xyxy(*xyxy)
+        else:
+            box = Box.from_xyxy(*raw_best.xyxy) if raw_best else None
+            scale = raw_best.scale if raw_best else 1.0
+        hits = []
+        for inst, result, fused in fused_list:
+            xyxy, hit_scale = _pick_box_and_scale(inst, result)
+            hit_box = Box.from_xyxy(*xyxy)
+            hits.append(SucaiHit(
+                score=round(fused, 4),
+                scale=round(hit_scale, 4),
+                box=hit_box,
+                center=hit_box.center,
+            ))
         matches.append(SucaiFindMatch(
             id=record["id"],
             describe=record.get("describe", ""),
             category=record.get("category", ""),
             found=found,
             score=round(score, 4),
-            scale=best.scale if best else 1.0,
+            scale=round(scale, 4),
             box=box,
             center=box.center if box else None,
-            hits=[
-                SucaiHit(
-                    score=round(max(0.0, float(h.confidence)), 4),
-                    scale=h.scale,
-                    box=Box.from_xyxy(*h.xyxy),
-                    center=Box.from_xyxy(*h.xyxy).center,
-                )
-                for h in sorted(instances, key=lambda h: h.confidence, reverse=True)
-            ],
+            hits=hits,
             elapsed_ms=round(elapsed_ms, 1),
         ))
 

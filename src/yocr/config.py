@@ -83,6 +83,14 @@ class Settings:
     # Sucai (素材) template registry storage directory.
     sucai_dir: Path = field(default_factory=lambda: Path(_env("YOCR_SUCAI_DIR", "data/sucai")))
 
+    # XFeat feature-based verification for template hits: re-checks NCC
+    # candidates geometrically and refines their boxes (see yocr/verify.py).
+    # Disable with YOCR_MATCH_VERIFY=0; missing weights degrade to plain NCC.
+    match_verify: bool = field(default_factory=lambda: _env_bool("YOCR_MATCH_VERIFY", True))
+    xfeat_weights: Path = field(
+        default_factory=lambda: Path(_env("YOCR_XFEAT_WEIGHTS", ".cache/xfeat/xfeat.pt"))
+    )
+
     # Built SPA directory served at "/" when it exists (see frontend/).
     static_dir: Path = field(default_factory=lambda: Path(_env("YOCR_STATIC_DIR", "frontend/dist")))
 

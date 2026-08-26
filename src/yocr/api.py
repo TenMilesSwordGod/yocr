@@ -263,8 +263,13 @@ async def find_sucai_endpoint(
     if not file and not image_base64:
         raise HTTPException(status_code=400, detail="provide multipart 'file' or 'image_base64'")
     try:
-        return find_sucai(store, file, image_base64, threshold=threshold, top_k=top_k,
-                          all_instances=all_instances)
+        ctx = get_ctx(request)
+        return find_sucai(
+            store, file, image_base64, threshold=threshold, top_k=top_k,
+            all_instances=all_instances,
+            match_verify=ctx.settings.match_verify,
+            xfeat_weights=ctx.settings.xfeat_weights,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
