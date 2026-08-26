@@ -24,11 +24,12 @@ from .schemas import (
     OcrResponse,
     SucaiFindMatch,
     SucaiFindResponse,
+    SucaiHit,
     TextLine,
     Timing,
 )
 from .sucai import SucaiStore
-from .template import locate_template
+from .template import locate_instances, locate_template
 
 logger = logging.getLogger("yocr.pipeline")
 
@@ -279,12 +280,13 @@ def find_sucai(
     *,
     threshold: float = 0.8,
     top_k: int = 0,
+    all_instances: bool = False,
 ) -> SucaiFindResponse:
     """Compare a scene screenshot against every registered sucai template.
 
     Each sucai picture is located in the scene with multi-scale NCC; results
-    are sorted by score (best first). Items scoring >= threshold are flagged
-    ``found`` and carry their bounding box / clickable center.
+    are sorted by score (best first). Items with at least one instance scoring
+    >= threshold are flagged ``found`` and carry bounding box / clickable center.
 
     Args:
         store: Registered sucai library.
@@ -292,6 +294,8 @@ def find_sucai(
         scene_b64: Scene image as base64.
         threshold: Minimum score to flag a sucai as found.
         top_k: Keep only the best N results (0 = keep all).
+        all_instances: Report every occurrence of each sucai (NMS-deduped)
+            instead of only its single best location.
 
     Returns:
         SucaiFindResponse: Per-sucai matches sorted by score descending.
@@ -309,28 +313,49 @@ def find_sucai(
         item_started = time.perf_counter()
         try:
             template = decode_image(store.read_image(record["id"]))
-            # threshold=0 keeps the best hit even below the decision line so
-            # callers can see how close a near-miss was.
-            hit = locate_template(scene, template, threshold=0.0)
+            if all_instances:
+                # Every occurrence >= threshold (NMS-deduped); best keeps the
+                # raw top match even below threshold for near-miss display.
+                located = locate_instances(scene, template, threshold=threshold)
+                instances, raw_best = located.instances, located.best
+            else:
+                # Single best instance; locate_instances still reports the raw
+                # best when nothing crosses the threshold (near-miss display).
+                located = locate_instances(
+                    scene, template, threshold=threshold, max_instances=1
+                )
+                instances, raw_best = located.instances, located.best
         except (ValueError, OSError) as exc:
             # Corrupt picture, or meta.json entry whose PNG vanished from disk:
             # skip the item instead of failing the whole search.
             logger.warning("sucai '%s' unusable, skipped: %s", record["id"], exc)
             continue
         elapsed_ms = (time.perf_counter() - item_started) * 1000
-        score = max(0.0, float(hit.confidence)) if hit else 0.0
-        # hit is None => template could not be compared at all (e.g. larger
-        # than the scene at every scale): never report it as found.
-        found = hit is not None and score >= threshold
-        box = Box.from_xyxy(*hit.xyxy) if hit else None
+        score = max(0.0, float(raw_best.confidence)) if raw_best else 0.0
+        # No instance => nothing reached threshold (or the template could not
+        # be compared at all): never report it as found.
+        found = bool(instances)
+        # Best instance when found; otherwise keep the raw best so callers
+        # still see where the closest near-miss was.
+        best = instances[0] if instances else raw_best
+        box = Box.from_xyxy(*best.xyxy) if best else None
         matches.append(SucaiFindMatch(
             id=record["id"],
             describe=record.get("describe", ""),
             found=found,
             score=round(score, 4),
-            scale=hit.scale if hit else 1.0,
+            scale=best.scale if best else 1.0,
             box=box,
             center=box.center if box else None,
+            hits=[
+                SucaiHit(
+                    score=round(max(0.0, float(h.confidence)), 4),
+                    scale=h.scale,
+                    box=Box.from_xyxy(*h.xyxy),
+                    center=Box.from_xyxy(*h.xyxy).center,
+                )
+                for h in sorted(instances, key=lambda h: h.confidence, reverse=True)
+            ],
             elapsed_ms=round(elapsed_ms, 1),
         ))
 

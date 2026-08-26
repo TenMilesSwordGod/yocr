@@ -228,6 +228,7 @@ async def find_sucai_endpoint(
     image_base64: str | None = Form(default=None),
     threshold: float = Query(default=0.8, ge=0.0, le=1.0, description="命中判定阈值"),
     top_k: int = Query(default=0, ge=0, description="只返回得分最高的 N 条；0 = 全部"),
+    all_instances: bool = Query(default=False, description="返回同一素材的全部出现位置（NMS 去重）"),
 ):
     """在场景图(file/image_base64)中比对全部已注册素材并定位命中项。"""
     store = get_sucai_store(request)
@@ -239,7 +240,8 @@ async def find_sucai_endpoint(
     if not file and not image_base64:
         raise HTTPException(status_code=400, detail="provide multipart 'file' or 'image_base64'")
     try:
-        return find_sucai(store, file, image_base64, threshold=threshold, top_k=top_k)
+        return find_sucai(store, file, image_base64, threshold=threshold, top_k=top_k,
+                          all_instances=all_instances)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

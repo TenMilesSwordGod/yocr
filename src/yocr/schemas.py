@@ -134,16 +134,29 @@ class SucaiListResponse(BaseModel):
     items: list[SucaiInfo]
 
 
+class SucaiHit(BaseModel):
+    """素材在场景图中的一个出现实例。"""
+
+    score: float = Field(description="该实例的归一化相关度 0~1")
+    scale: float = Field(default=1.0, description="命中时的模板缩放系数")
+    box: Box = Field(description="该实例外接框")
+    center: tuple[int, int] = Field(description="该实例中心点")
+
+
 class SucaiFindMatch(BaseModel):
     """单个素材在场景图中的比对结果。"""
 
     id: str
     describe: str = ""
-    found: bool = Field(description="score 是否达到阈值")
-    score: float = Field(description="归一化相关度 0~1")
-    scale: float = Field(default=1.0, description="命中时模板缩放系数")
-    box: Optional[Box] = Field(default=None, description="命中区域外接框；未命中为 null")
-    center: Optional[tuple[int, int]] = Field(default=None, description="命中区域中心点")
+    found: bool = Field(description="是否有达到阈值的实例")
+    score: float = Field(description="最佳实例（或最近似）的归一化相关度 0~1")
+    scale: float = Field(default=1.0, description="最佳实例的模板缩放系数")
+    box: Optional[Box] = Field(default=None, description="最佳实例外接框；无可比位置时为 null")
+    center: Optional[tuple[int, int]] = Field(default=None, description="最佳实例中心点")
+    hits: list[SucaiHit] = Field(
+        default_factory=list,
+        description="全部达到阈值的实例（all_instances=true 时可多于 1 个），按 score 降序",
+    )
     elapsed_ms: float = Field(default=0.0, description="该素材比对耗时")
 
 

@@ -400,3 +400,144 @@ def test_find_corrupt_scene_400(client):
 def test_find_json_body_without_image_400(client):
     r = client.post("/api/v1/sucai/find", json={"unrelated": 1})
     assert r.status_code == 400
+
+
+def test_find_all_instances_reports_every_occurrence(client):
+    tpl_bytes = _pattern_png(40, 30, seed=61)
+    tpl = cv2.imdecode(np.frombuffer(tpl_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("t.png", tpl_bytes, "image/png")},
+                    data={"id": "twice"})
+    assert r.status_code == 201, r.text
+
+    scene = np.zeros((200, 300, 3), dtype=np.uint8)
+    scene[20:50, 30:70] = tpl    # occurrence 1
+    scene[100:130, 200:240] = tpl  # occurrence 2
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+
+    # default: single best location (backward compatible shape)
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")},
+                    params={"threshold": 0.8}).json()
+    mine = next(m for m in r["results"] if m["id"] == "twice")
+    assert mine["found"] is True
+    assert len(mine["hits"]) == 1
+
+    # all_instances=true: both occurrences, exact boxes, best first
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")},
+                    params={"threshold": 0.8, "all_instances": "true"}).json()
+    mine = next(m for m in r["results"] if m["id"] == "twice")
+    assert mine["found"] is True
+    assert len(mine["hits"]) == 2
+    boxes = [h["box"]["xyxy"] for h in mine["hits"]]
+    assert [30, 20, 70, 50] in boxes and [200, 100, 240, 130] in boxes
+    assert all(h["score"] >= 0.8 for h in mine["hits"])
+    assert mine["box"]["xyxy"] == mine["hits"][0]["box"]["xyxy"]
+    assert mine["center"] == mine["hits"][0]["center"]
+
+
+def test_find_all_instances_nms_merges_overlapping_peaks(client):
+    tpl_bytes = _pattern_png(40, 30, seed=62)
+    tpl = cv2.imdecode(np.frombuffer(tpl_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("t.png", tpl_bytes, "image/png")},
+                    data={"id": "nms-me"})
+    assert r.status_code == 201
+
+    # two copies shifted by only 4px: same physical spot, NMS must keep one
+    scene = np.zeros((150, 150, 3), dtype=np.uint8)
+    scene[40:70, 40:80] = tpl
+    scene[44:74, 44:84] = tpl
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")},
+                    params={"threshold": 0.8, "all_instances": "true"}).json()
+    mine = next(m for m in r["results"] if m["id"] == "nms-me")
+    assert len(mine["hits"]) == 1
+
+
+def test_find_scale_refinement_locates_offscale_template(client):
+    """True scale 1.02 is not in the coarse list; refinement must nail the box."""
+    tpl_bytes = _pattern_png(40, 32, seed=63)
+    tpl = cv2.imdecode(np.frombuffer(tpl_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("t.png", tpl_bytes, "image/png")},
+                    data={"id": "offscale"})
+    assert r.status_code == 201, r.text
+
+    small = cv2.resize(tpl, None, fx=1.02, fy=1.02, interpolation=cv2.INTER_AREA)
+    scene = np.zeros((150, 200, 3), dtype=np.uint8)
+    scene[50:83, 60:101] = small  # 41x33 at (60, 50)
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")},
+                    params={"threshold": 0.8, "all_instances": "true"}).json()
+    mine = next(m for m in r["results"] if m["id"] == "offscale")
+    assert mine["found"] is True
+    assert abs(mine["scale"] - 1.02) <= 0.016
+    x1, y1, x2, y2 = mine["box"]["xyxy"]
+    assert abs(x1 - 60) <= 2 and abs(y1 - 50) <= 2
+    assert abs(x2 - 101) <= 2 and abs(y2 - 83) <= 2
+
+
+def _tinted_texture(seed, base_bgr):
+    """Texture whose grayscale is ~identical across different tints.
+
+    gray = 0.299R + 0.587G + 0.114B ends up equal for both tints (the tint
+    rides on a shared luminance texture), so grayscale NCC alone cannot
+    tell them apart — only the color gate can.
+    """
+    rng = np.random.default_rng(seed)
+    t = rng.integers(0, 50, (30, 40), dtype=np.uint8).astype(np.int16)
+    b, g, r = base_bgr
+    img = np.stack(
+        [np.clip(b + t, 0, 255), np.clip(g + t, 0, 255), np.clip(r + t, 0, 255)],
+        axis=-1,
+    ).astype(np.uint8)
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    return buf.tobytes()
+
+
+def test_find_color_gate_blocks_cross_color_matches(client):
+    """Same texture, different color: gray NCC would cross-match at ~1.0."""
+    red = _tinted_texture(71, (0, 0, 200))    # red-dominant, gray ≈ t + 60
+    blue = _tinted_texture(71, (255, 0, 0))   # blue-dominant, gray ≈ t + 60
+    assert red != blue
+
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("red.png", red, "image/png")},
+                    data={"id": "red-btn", "describe": "红色按钮"})
+    assert r.status_code == 201
+    r = client.post("/api/v1/sucai",
+                    files={"file": ("blue.png", blue, "image/png")},
+                    data={"id": "blue-btn", "describe": "蓝色按钮"})
+    assert r.status_code == 201
+
+    red_img = cv2.imdecode(np.frombuffer(red, np.uint8), cv2.IMREAD_COLOR)
+    blue_img = cv2.imdecode(np.frombuffer(blue, np.uint8), cv2.IMREAD_COLOR)
+    scene = np.zeros((160, 240, 3), dtype=np.uint8)
+    scene[20:50, 30:70] = red_img
+    scene[90:120, 150:190] = blue_img
+    ok, buf = cv2.imencode(".png", scene)
+    assert ok
+
+    r = client.post("/api/v1/sucai/find",
+                    files={"file": ("s.png", buf.tobytes(), "image/png")},
+                    params={"threshold": 0.8, "all_instances": "true"}).json()
+    by_id = {m["id"]: m for m in r["results"]}
+
+    # each sucai found exactly once, at its own color's location
+    assert by_id["red-btn"]["found"] is True
+    assert by_id["blue-btn"]["found"] is True
+    assert len(by_id["red-btn"]["hits"]) == 1
+    assert len(by_id["blue-btn"]["hits"]) == 1
+    assert by_id["red-btn"]["box"]["xyxy"] == [30, 20, 70, 50]
+    assert by_id["blue-btn"]["box"]["xyxy"] == [150, 90, 190, 120]
+    # the wrong-color location must not score above the threshold
+    assert by_id["red-btn"]["hits"][0]["score"] >= 0.8
+    assert by_id["blue-btn"]["hits"][0]["score"] >= 0.8

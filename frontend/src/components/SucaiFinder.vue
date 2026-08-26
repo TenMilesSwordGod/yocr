@@ -6,6 +6,7 @@ const sceneUrl = ref('')
 const sceneFile = ref(null)
 const sceneInfo = ref(null)
 const threshold = ref(0.8)
+const allInstances = ref(true)
 const searching = ref(false)
 const error = ref('')
 const response = ref(null)
@@ -44,7 +45,11 @@ async function search() {
   searching.value = true
   error.value = ''
   try {
-    response.value = await findSucai({ sceneFile: sceneFile.value, threshold: threshold.value })
+    response.value = await findSucai({
+      sceneFile: sceneFile.value,
+      threshold: threshold.value,
+      allInstances: allInstances.value,
+    })
     selected.value = response.value.results.find(r => r.found) || null
     await draw()
   } catch (e) {
@@ -71,23 +76,29 @@ async function draw() {
 
   if (!response.value) return
   for (const r of foundResults.value) {
-    if (!r.box) continue
-    const active = !selected.value || selected.value.id === r.id
-    ctx.save()
-    ctx.lineWidth = r.id === selected.value?.id ? 4 : 2.5
-    ctx.strokeStyle = active ? (r.id === selected.value?.id ? '#34c77b' : '#ffb020') : 'rgba(255,176,32,.35)'
-    ctx.setLineDash(active ? [] : [6, 4])
-    ctx.strokeRect(...r.box.xyxy)
-    // label chip
-    const label = `${r.describe || r.id} ${r.score}`
-    ctx.font = '14px sans-serif'
-    const w = ctx.measureText(label).width + 10
-    const ly = Math.max(r.box.xyxy[1] - 22, 0)
-    ctx.fillStyle = ctx.strokeStyle
-    ctx.fillRect(r.box.xyxy[0], ly, w, 20)
-    ctx.fillStyle = '#10131a'
-    ctx.fillText(label, r.box.xyxy[0] + 5, ly + 15)
-    ctx.restore()
+    // all_instances mode reports every occurrence in r.hits; otherwise fall
+    // back to the single best box.
+    const instances = r.hits?.length ? r.hits : (r.box ? [{ box: r.box, score: r.score }] : [])
+    instances.forEach((inst, idx) => {
+      if (!inst.box) return
+      const isSel = selected.value?.id === r.id
+      const active = !selected.value || isSel
+      ctx.save()
+      ctx.lineWidth = isSel ? 4 : 2.5
+      ctx.strokeStyle = active ? (isSel ? '#34c77b' : '#ffb020') : 'rgba(255,176,32,.35)'
+      ctx.setLineDash(active ? [] : [6, 4])
+      ctx.strokeRect(...inst.box.xyxy)
+      // label chip
+      const label = `${r.describe || r.id}${instances.length > 1 ? ` #${idx + 1}` : ''} ${inst.score}`
+      ctx.font = '14px sans-serif'
+      const w = ctx.measureText(label).width + 10
+      const ly = Math.max(inst.box.xyxy[1] - 22, 0)
+      ctx.fillStyle = ctx.strokeStyle
+      ctx.fillRect(inst.box.xyxy[0], ly, w, 20)
+      ctx.fillStyle = '#10131a'
+      ctx.fillText(label, inst.box.xyxy[0] + 5, ly + 15)
+      ctx.restore()
+    })
   }
 }
 </script>
@@ -106,6 +117,11 @@ async function draw() {
       <label class="field">
         <span>判定阈值：<b>{{ threshold.toFixed(2) }}</b></span>
         <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01" />
+      </label>
+
+      <label class="check">
+        <input v-model="allInstances" type="checkbox" />
+        <span>标记所有出现位置（同一素材出现多次时全部框出）</span>
       </label>
 
       <button :disabled="searching" style="width:100%" @click="search">
@@ -148,6 +164,7 @@ async function draw() {
               <div class="row">
                 <span class="score">{{ r.score.toFixed(4) }}</span>
                 <span class="badge" :class="r.found ? 'hit' : 'miss'">{{ r.found ? '命中' : '未中' }}</span>
+                <span v-if="r.hits && r.hits.length > 1" class="badge multi">×{{ r.hits.length }} 处</span>
                 <span v-if="r.center" class="dim">@ ({{ r.center[0] }}, {{ r.center[1] }})</span>
               </div>
             </div>
@@ -238,4 +255,16 @@ input[type=range] { accent-color: var(--accent); }
 .badge { border-radius: 999px; padding: 1px 8px; font-weight: 600; }
 .badge.hit { background: rgba(52,199,123,.15); color: var(--ok); }
 .badge.miss { background: rgba(154,160,171,.15); color: var(--text-dim); }
+.badge.multi { background: rgba(79,140,255,.15); color: var(--accent); }
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.check input { width: auto; accent-color: var(--accent); margin-top: 2px; }
+.check:hover { color: var(--text); }
 </style>

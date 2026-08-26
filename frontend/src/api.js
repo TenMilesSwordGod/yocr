@@ -39,11 +39,11 @@ export async function deleteSucai(id) {
   return handle(await fetch(`${BASE}/sucai/${encodeURIComponent(id)}`, { method: 'DELETE' }))
 }
 
-export async function findSucai({ sceneFile, threshold, topK = 0 }) {
+export async function findSucai({ sceneFile, threshold, topK = 0, allInstances = false }) {
   const form = new FormData()
   form.append('file', sceneFile)
   return handle(await fetch(
-    `${BASE}/sucai/find?threshold=${threshold}&top_k=${topK}`,
+    `${BASE}/sucai/find?threshold=${threshold}&top_k=${topK}&all_instances=${allInstances}`,
     { method: 'POST', body: form },
   ))
 }

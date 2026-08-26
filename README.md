@@ -269,11 +269,17 @@ curl -F "file=@screen.png" "http://127.0.0.1:8000/api/v1/sucai/find?threshold=0.
   "found_any": true, "sucai_count": 3, "threshold": 0.8,
   "results": [
     {"id": "btn-confirm", "describe": "确认按钮", "found": true, "score": 0.9812,
-     "scale": 1.0, "box": {"xyxy": [812,540,902,585], "center": [857,562]}, "elapsed_ms": 4.2}
+     "scale": 1.0, "box": {"xyxy": [812,540,902,585], "center": [857,562]},
+     "hits": [{"score": 0.9812, "scale": 1.0, "box": {...}, "center": [...]}],
+     "elapsed_ms": 4.2}
   ],
   "timing": {"total_ms": 13.8}
 }
 ```
+
+匹配精度：多尺度 NCC + **逐级尺度细化**（亚步长定位）+ **颜色校验门**
+（同形状不同颜色的控件不再互相误报），`all_instances=true` 时用跨尺度 NMS
+返回同一素材的**全部出现位置**（`hits` 数组，默认只返回最佳位置）。
 
 素材持久化在 `YOCR_SUCAI_DIR`（默认 `./data/sucai`，meta.json + PNG），重启不丢、可整目录拷贝。
 
@@ -286,7 +292,8 @@ make run                                        # 打开 http://127.0.0.1:8000/
 
 - **素材库**：拖拽/选择图片 + id + 描述 → 注册；卡片列表支持预览与删除
 - **查找定位**：上传或 **Ctrl+V 直接粘贴截图** → 与全部素材比对，画布上框出命中位置，
-  结果列表按得分排序（未过阈值的也会显示最高得分，便于调阈值）
+  结果列表按得分排序（未过阈值的也会显示最高得分，便于调阈值）；
+  勾选"标记所有出现位置"可同时框出同一素材的每一次出现
 
 前端开发模式（热更新，`/api` 自动代理到 8000）：`make frontend-dev`。
 Docker 镜像已内置构建好的前端，无需额外步骤。
